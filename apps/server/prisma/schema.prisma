@@ -1,0 +1,149 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Site {
+  id           String        @id @default(cuid())
+  name         String
+  url          String
+  apiUser      String
+  apiPassword  String
+  enabled      Boolean       @default(true)
+  lastPublished DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  publishTasks PublishTask[]
+
+  @@index([enabled])
+}
+
+model Source {
+  id          String           @id @default(cuid())
+  name        String
+  endpoint    String
+  type        SourceType       @default(RSS)
+  enabled     Boolean          @default(true)
+  lastFetch   DateTime?
+  fetchStatus FetchStatus      @default(NEVER)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  posts       AggregatedPost[]
+  fetchJobs   FetchJob[]
+
+  @@index([enabled])
+  @@index([lastFetch])
+}
+
+model AggregatedPost {
+  id             String         @id @default(cuid())
+  sourceId       String
+  source         Source         @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  remoteId       String?
+  title          String
+  content        String?        @db.Text
+  excerpt        String?
+  imageUrl       String?
+  originalUrl    String?
+  author         String?
+  hash           String         @unique
+  language       String         @default("en")
+  aiSummary      String?        @db.Text
+  qualityScore   Int?
+  approvalStatus ApprovalStatus @default(PENDING)
+  publishStatus  PublishStatus  @default(DRAFT)
+  scheduledDate  DateTime?
+  publishedDate  DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  publishTasks   PublishTask[]
+
+  @@index([sourceId])
+  @@index([approvalStatus])
+  @@index([publishStatus])
+  @@index([createdAt])
+  @@index([hash])
+}
+
+model PublishTask {
+  id       String         @id @default(cuid())
+  postId   String
+  post     AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  siteId   String
+  site     Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  status   TaskStatus     @default(PENDING)
+  wpPostId Int?
+  error    String?
+  attempts Int            @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@unique([postId, siteId])
+  @@index([status])
+}
+
+model FetchJob {
+  id        String      @id @default(cuid())
+  sourceId  String
+  source    Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  status    FetchStatus @default(PENDING)
+  fetched   Int         @default(0)
+  newPosts  Int         @default(0)
+  error     String?
+  duration  Int?
+  createdAt DateTime    @default(now())
+
+  @@index([sourceId])
+  @@index([createdAt])
+}
+
+model Setting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+enum SourceType {
+  RSS
+  WP_API
+}
+
+enum FetchStatus {
+  NEVER
+  PENDING
+  OK
+  ERROR
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum PublishStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+}
+
+enum TaskStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}

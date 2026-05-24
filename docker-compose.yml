@@ -1,0 +1,62 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aggregator
+      POSTGRES_PASSWORD: aggregator
+      POSTGRES_DB: aggregator
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aggregator']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    build:
+      context: ./apps/server
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://aggregator:aggregator@postgres:5432/aggregator
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: super-secret-jwt-key-change-in-production
+      ENCRYPTION_KEY: 32-char-encryption-key-change-now
+      PORT: "3001"
+      CORS_ORIGIN: http://localhost:8090
+      NODE_ENV: production
+    ports:
+      - '3001:3001'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  client:
+    build:
+      context: ./apps/client
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - '8090:80'
+    depends_on:
+      - server
+
+volumes:
+  postgres_data:
+  redis_data:
