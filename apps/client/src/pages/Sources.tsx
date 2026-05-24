@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2 } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2, Upload, FileUp, ChevronLeft, ChevronRight, CheckCircle, XCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { sourcesApi } from '@/lib/api'
@@ -67,23 +67,183 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
   )
 }
 
+function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [text, setText] = useState('')
+  const [results, setResults] = useState<{ created: number; duplicates: number; errors: number; items: any[] } | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const importMut = useMutation({
+    mutationFn: (urls: string[]) => sourcesApi.import(urls),
+    onSuccess: (d) => {
+      setResults({ created: d.created, duplicates: d.duplicates, errors: d.errors, items: d.results })
+      qc.invalidateQueries({ queryKey: ['sources'] })
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Import failed'),
+  })
+
+  function handleSubmit() {
+    const urls = text.split('\n').map(l => l.trim()).filter(Boolean)
+    if (!urls.length) { toast.error('No URLs found'); return }
+    importMut.mutate(urls)
+  }
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setText(ev.target?.result as string ?? '')
+    reader.readAsText(file)
+  }
+
+  function handleClose() {
+    setText(''); setResults(null)
+    if (fileRef.current) fileRef.current.value = ''
+    onClose()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Import WordPress Sources</DialogTitle></DialogHeader>
+
+        {!results ? (
+          <>
+            <div className="space-y-3 py-2">
+              <p className="text-sm text-muted-foreground">Paste one WordPress site URL per line. Each will be added as a WP REST API source.</p>
+              <textarea
+                className="w-full h-40 rounded-md border border-border bg-secondary/50 px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground"
+                placeholder={"https://site1.com\nhttps://site2.com\nhttps://site3.com"}
+                value={text}
+                onChange={e => setText(e.target.value)}
+              />
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+                  <FileUp className="h-4 w-4" />Load .txt file
+                </Button>
+                <span className="text-xs text-muted-foreground">or paste URLs above</span>
+                <input ref={fileRef} type="file" accept=".txt,text/plain" className="hidden" onChange={handleFile} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button onClick={handleSubmit} disabled={!text.trim() || importMut.isPending}>
+                {importMut.isPending && <Loader2 className="animate-spin" />}
+                <Upload />Import
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
+            <div className="space-y-3 py-2">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-md bg-emerald-500/10 border border-emerald-500/20 p-3 text-center">
+                  <p className="text-2xl font-bold text-emerald-400">{results.created}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Added</p>
+                </div>
+                <div className="rounded-md bg-yellow-500/10 border border-yellow-500/20 p-3 text-center">
+                  <p className="text-2xl font-bold text-yellow-400">{results.duplicates}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Duplicate</p>
+                </div>
+                <div className="rounded-md bg-red-500/10 border border-red-500/20 p-3 text-center">
+                  <p className="text-2xl font-bold text-red-400">{results.errors}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Error</p>
+                </div>
+              </div>
+              {results.errors > 0 && (
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {results.items.filter(r => r.status === 'error').map((r, i) => (
+                    <p key={i} className="text-xs text-red-400 font-mono truncate">{r.url}: {r.error}</p>
+                  ))}
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button onClick={handleClose}>Done</Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function Sources() {
   const [open, setOpen] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
+  const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
   const qc = useQueryClient()
 
+  useEffect(() => {
+    const controller = new AbortController()
+
+    async function connect() {
+      try {
+        const token = localStorage.getItem('token')
+        const res = await fetch('/api/sources/events', {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: controller.signal,
+        })
+        if (!res.ok || !res.body) return
+
+        const reader  = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() ?? ''
+          for (const part of parts) {
+            const line = part.split('\n').find(l => l.startsWith('data:'))
+            if (!line) continue
+            try {
+              const ev = JSON.parse(line.slice(5).trim()) as {
+                type: 'job:active' | 'job:completed' | 'job:failed'
+                sourceId: string
+              }
+              const status = ev.type === 'job:active' ? 'active' : ev.type === 'job:completed' ? 'completed' : 'failed'
+              setActiveJobs(prev => ({ ...prev, [ev.sourceId]: status }))
+              if (status !== 'active') {
+                qc.invalidateQueries({ queryKey: ['sources'] })
+                setTimeout(() => setActiveJobs(prev => {
+                  const next = { ...prev }
+                  delete next[ev.sourceId]
+                  return next
+                }), 3000)
+              }
+            } catch { /* malformed SSE line */ }
+          }
+        }
+      } catch (e) {
+        if ((e as any).name !== 'AbortError') setTimeout(connect, 3000)
+      }
+    }
+
+    connect()
+    return () => controller.abort()
+  }, [qc])
+
   const { data, isLoading } = useQuery({
-    queryKey: ['sources'],
-    queryFn: () => sourcesApi.list(),
+    queryKey: ['sources', page, perPage],
+    queryFn: () => sourcesApi.list({ page, per_page: perPage }),
+    placeholderData: (prev: any) => prev,
   })
+
+  const invalidate = () => qc.invalidateQueries({ queryKey: ['sources'] })
 
   const toggle = useMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => sourcesApi.update(id, { enabled }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sources'] }),
+    onSuccess: invalidate,
   })
 
   const remove = useMutation({
     mutationFn: (id: string) => sourcesApi.remove(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sources'] }); toast.success('Source removed') },
+    onSuccess: () => { invalidate(); toast.success('Source removed') },
   })
 
   const fetchOne = useMutation({
@@ -96,10 +256,11 @@ export function Sources() {
     onSuccess: (d) => toast.success(`${d.queued} sources queued for fetch`),
   })
 
-  const sources = data?.items ?? []
+  const sources    = data?.items ?? []
+  const totalPages = data?.pages ?? 1
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Sources</h1>
@@ -110,11 +271,15 @@ export function Sources() {
             {fetchAll.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             Fetch All
           </Button>
+          <Button variant="outline" onClick={() => setImportOpen(true)}>
+            <Upload />Import
+          </Button>
           <Button onClick={() => setOpen(true)}><Plus />Add Source</Button>
         </div>
       </div>
 
       <AddSourceDialog open={open} onClose={() => setOpen(false)} />
+      <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
 
       {isLoading ? (
         <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
@@ -127,52 +292,83 @@ export function Sources() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid gap-3">
-          {sources.map((src: any) => (
-            <Card key={src.id}>
-              <CardContent className="flex items-center justify-between p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary">
-                    <Rss className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-sm">{src.name}</p>
-                      <Badge variant="outline" className="text-xs">{src.type}</Badge>
+        <>
+          <div className="grid gap-3">
+            {sources.map((src: any) => (
+              <Card key={src.id}>
+                <CardContent className="flex items-center justify-between p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary">
+                      <Rss className="h-4 w-4 text-muted-foreground" />
                     </div>
-                    <p className="text-xs text-muted-foreground truncate max-w-sm">{src.endpoint}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {src.lastFetch
-                        ? `Fetched ${formatDistanceToNow(new Date(src.lastFetch), { addSuffix: true })}`
-                        : 'Never fetched'}
-                      {' · '}{src._count?.posts ?? 0} posts
-                    </p>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-sm">{src.name}</p>
+                        <Badge variant="outline" className="text-xs">{src.type}</Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate max-w-sm">{src.endpoint}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {src.lastFetch
+                          ? `Fetched ${formatDistanceToNow(new Date(src.lastFetch), { addSuffix: true })}`
+                          : 'Never fetched'}
+                        {' · '}{src._count?.posts ?? 0} posts
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <Badge variant={src.fetchStatus === 'OK' ? 'success' : src.fetchStatus === 'ERROR' ? 'destructive' : 'secondary'}>
-                    {src.fetchStatus}
-                  </Badge>
-                  <Switch
-                    checked={src.enabled}
-                    onCheckedChange={(enabled) => toggle.mutate({ id: src.id, enabled })}
-                  />
-                  <Button
-                    size="sm" variant="outline"
-                    onClick={() => fetchOne.mutate(src.id)}
-                    disabled={fetchOne.isPending}
-                  >
-                    {fetchOne.isPending ? <Loader2 className="animate-spin" /> : <Zap />}
-                    Fetch
-                  </Button>
-                  <Button size="icon" variant="ghost" onClick={() => remove.mutate(src.id)} className="text-muted-foreground hover:text-destructive">
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                  <div className="flex items-center gap-3">
+                    <Badge variant={src.fetchStatus === 'OK' ? 'success' : src.fetchStatus === 'ERROR' ? 'destructive' : 'secondary'}>
+                      {src.fetchStatus}
+                    </Badge>
+                    <Switch
+                      checked={src.enabled}
+                      onCheckedChange={(enabled) => toggle.mutate({ id: src.id, enabled })}
+                    />
+                    <Button
+                      size="sm" variant="outline"
+                      onClick={() => fetchOne.mutate(src.id)}
+                      disabled={fetchOne.isPending || activeJobs[src.id] === 'active'}
+                    >
+                      {(fetchOne.isPending || activeJobs[src.id] === 'active')
+                        ? <Loader2 className="animate-spin" />
+                        : activeJobs[src.id] === 'completed'
+                        ? <CheckCircle className="text-emerald-400" />
+                        : activeJobs[src.id] === 'failed'
+                        ? <XCircle className="text-red-400" />
+                        : <Zap />}
+                      {activeJobs[src.id] === 'active' ? 'Fetching…' : 'Fetch'}
+                    </Button>
+                    <Button size="icon" variant="ghost" onClick={() => remove.mutate(src.id)} className="text-muted-foreground hover:text-destructive">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-2">
+              <div className="flex items-center gap-1">
+                <Button size="icon" variant="ghost" className="h-8 w-8" disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground tabular-nums px-2">
+                  {page} / {totalPages}
+                </span>
+                <Button size="icon" variant="ghost" className="h-8 w-8" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}>
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+              <select
+                value={perPage}
+                onChange={e => { setPerPage(Number(e.target.value)); setPage(1) }}
+                className="h-8 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none"
+              >
+                {[10, 20, 50].map(n => <option key={n} value={n}>{n} / page</option>)}
+              </select>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
