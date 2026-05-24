@@ -4,6 +4,7 @@ import { fetch } from 'undici'
 import { db } from '../db.js'
 import { fetchQueue, fetchQueueEvents } from '../queue.js'
 import { encrypt } from '../lib/crypto.js'
+import { unwrapResponse, CAT_NAME_KEYS, FIELD_GUESS_MAP } from '../lib/customApi.js'
 
 const INTERVAL_MS: Record<string, number> = {
   '15m': 900_000,
@@ -273,5 +274,67 @@ export async function sourcesRoutes(app: FastifyInstance) {
     const errors     = results.filter(r => r.status === 'error').length
 
     return reply.code(201).send({ created, duplicates, errors, results })
+  })
+
+  app.post('/sources/scan-custom', { preHandler: [app.authenticate] }, async (req) => {
+    const { endpoint } = z.object({ endpoint: z.string().min(1) }).parse(req.body)
+
+    const categories: Array<{ id: string; name: string; count: number }> = []
+    let consecutiveMisses = 0
+
+    for (let batchStart = 1; batchStart <= 100 && consecutiveMisses < 10; batchStart += 10) {
+      const batchSize = Math.min(10, 101 - batchStart)
+      const batchIds = Array.from({ length: batchSize }, (_, i) => batchStart + i)
+
+      const results = await Promise.allSettled(
+        batchIds.map(async (id) => {
+          const url = endpoint.replace('{id}', String(id))
+          const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
+          if (!res.ok) throw new Error('not ok')
+          const data = await res.json()
+          const items = unwrapResponse(data)
+          if (!items.length) throw new Error('empty')
+          const first = items[0] as Record<string, unknown>
+          let name: string | undefined
+          for (const key of CAT_NAME_KEYS) {
+            if (typeof first[key] === 'string' && first[key]) { name = first[key] as string; break }
+          }
+          return { id: String(id), name: name ?? `Category ${id}`, count: items.length }
+        })
+      )
+
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          categories.push(r.value)
+          consecutiveMisses = 0
+        } else {
+          consecutiveMisses++
+        }
+      }
+    }
+
+    let suggestedFieldMap: Record<string, string> = {}
+    let sampleKeys: string[] = []
+
+    if (categories.length) {
+      try {
+        const firstUrl = endpoint.replace('{id}', categories[0].id)
+        const res = await fetch(firstUrl, { signal: AbortSignal.timeout(5000) })
+        if (res.ok) {
+          const data = await res.json()
+          const items = unwrapResponse(data)
+          if (items.length) {
+            sampleKeys = Object.keys(items[0] as object)
+            for (const [field, candidates] of Object.entries(FIELD_GUESS_MAP)) {
+              for (const c of candidates) {
+                if (sampleKeys.includes(c)) { suggestedFieldMap[field] = c; break }
+              }
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
+    }
+
+    return { categories, suggestedFieldMap, sampleKeys }
   })
 }
