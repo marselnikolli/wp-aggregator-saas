@@ -1,11 +1,11 @@
 # WP Aggregator SaaS — Todo
 
 ## Source Management
-- [ ] Optional credentials for WP REST API sources (public endpoints work without auth)
+- [x] Optional credentials for WP REST API sources (public endpoints work without auth)
 - [ ] Custom API source type with field mapping (e.g. meshume.php?j=60&id=4&p= style endpoints) - for each website that matches this API source it will be needed to map each ID number with the category name
-- [ ] RSS auto-detection (enter domain URL, auto-probe /feed, /rss, /feed.xml, /atom.xml)
+- [x] RSS auto-detection (enter domain URL, auto-probe /feed, /rss, /feed.xml, /atom.xml)
 - [x] Bulk import sources from text file (one URL per line, domain-only URLs supported)
-- [ ] Per-source fetch interval (each source can have its own cron: every 15min, 1h, 6h, daily)
+- [x] Per-source fetch interval (each source can have its own cron: every 15min, 1h, 6h, daily)
 - [ ] Source health dashboard (success rate, avg fetch time, error history)
 - [ ] Source categories/tags for organisation
 - [ ] Source-level category mapping (map remote categories to local WP categories per target site)
