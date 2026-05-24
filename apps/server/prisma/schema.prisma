@@ -46,6 +46,9 @@ model Source {
   lastError   String?
   fetchCount  Int              @default(0)
   errorCount  Int              @default(0)
+  fieldMap          Json?
+  categoryMappings  Json?
+  paginationParam   String?
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   posts       AggregatedPost[]
@@ -127,6 +130,7 @@ model Setting {
 enum SourceType {
   RSS
   WP_API
+  CUSTOM_API
 }
 
 enum FetchStatus {
