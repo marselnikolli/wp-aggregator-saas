@@ -7,16 +7,22 @@ export async function postsRoutes(app: FastifyInstance) {
   app.get('/posts', { preHandler: [app.authenticate] }, async (req) => {
     const query = z.object({
       page:           z.coerce.number().min(1).default(1),
-      per_page:       z.coerce.number().min(1).max(100).default(20),
+      per_page:       z.coerce.number().min(1).max(100).default(25),
       approvalStatus: z.enum(['PENDING', 'APPROVED', 'REJECTED']).optional(),
       publishStatus:  z.enum(['DRAFT', 'SCHEDULED', 'PUBLISHED']).optional(),
       sourceId:       z.string().optional(),
+      category:       z.string().optional(),
+      dateFrom:       z.string().optional(),
+      search:         z.string().optional(),
     }).parse(req.query)
 
-    const where = {
+    const where: any = {
       ...(query.approvalStatus && { approvalStatus: query.approvalStatus }),
       ...(query.publishStatus  && { publishStatus: query.publishStatus }),
       ...(query.sourceId       && { sourceId: query.sourceId }),
+      ...(query.category       && { categories: { has: query.category } }),
+      ...(query.dateFrom       && { createdAt: { gte: new Date(query.dateFrom) } }),
+      ...(query.search         && { title: { contains: query.search, mode: 'insensitive' as const } }),
     }
 
     const [total, items] = await Promise.all([
@@ -32,20 +38,28 @@ export async function postsRoutes(app: FastifyInstance) {
     return { total, pages: Math.ceil(total / query.per_page), page: query.page, items }
   })
 
+  // Returns unique category names, optionally scoped to a source
+  app.get('/posts/categories', { preHandler: [app.authenticate] }, async (req) => {
+    const query = z.object({ sourceId: z.string().optional() }).parse(req.query)
+
+    const posts = await db.aggregatedPost.findMany({
+      select: { categories: true },
+      where: {
+        ...(query.sourceId && { sourceId: query.sourceId }),
+      },
+    })
+    const categories = [...new Set(posts.flatMap(p => p.categories))].filter(Boolean).sort()
+    return categories
+  })
+
   app.patch('/posts/:id/approve', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
-    return db.aggregatedPost.update({
-      where: { id },
-      data: { approvalStatus: 'APPROVED' },
-    })
+    return db.aggregatedPost.update({ where: { id }, data: { approvalStatus: 'APPROVED' } })
   })
 
   app.patch('/posts/:id/reject', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
-    return db.aggregatedPost.update({
-      where: { id },
-      data: { approvalStatus: 'REJECTED' },
-    })
+    return db.aggregatedPost.update({ where: { id }, data: { approvalStatus: 'REJECTED' } })
   })
 
   app.post('/posts/:id/publish', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -69,6 +83,16 @@ export async function postsRoutes(app: FastifyInstance) {
       })
     )
     return { queued: tasks.length, taskIds: tasks }
+  })
+
+  app.patch('/posts/:id', { preHandler: [app.authenticate] }, async (req) => {
+    const { id } = req.params as { id: string }
+    const body = z.object({
+      title:   z.string().min(1).optional(),
+      excerpt: z.string().optional(),
+      content: z.string().optional(),
+    }).parse(req.body)
+    return db.aggregatedPost.update({ where: { id }, data: body })
   })
 
   app.delete('/posts/:id', { preHandler: [app.authenticate] }, async (req, reply) => {

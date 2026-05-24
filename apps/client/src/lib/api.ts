@@ -29,25 +29,31 @@ export const sitesApi = {
 }
 
 export const sourcesApi = {
-  list:     (p?: any) => api.get('/sources', { params: p }).then(r => r.data),
-  create:   (d: any)  => api.post('/sources', d).then(r => r.data),
-  update:   (id: string, d: any) => api.patch(`/sources/${id}`, d).then(r => r.data),
-  remove:   (id: string) => api.delete(`/sources/${id}`),
-  fetch:    (id: string) => api.post(`/sources/${id}/fetch`).then(r => r.data),
-  fetchAll: () => api.post('/sources/fetch-all').then(r => r.data),
+  list:       (p?: any) => api.get('/sources', { params: p }).then(r => r.data),
+  create:     (d: any)  => api.post('/sources', d).then(r => r.data),
+  update:     (id: string, d: any) => api.patch(`/sources/${id}`, d).then(r => r.data),
+  remove:     (id: string) => api.delete(`/sources/${id}`),
+  fetch:      (id: string) => api.post(`/sources/${id}/fetch`).then(r => r.data),
+  fetchAll:   () => api.post('/sources/fetch-all').then(r => r.data),
+  import:     (urls: string[]) => api.post('/sources/import', { urls }).then(r => r.data),
+  categories: (id: string) => api.get(`/sources/${id}/categories`).then(r => r.data),
 }
 
 export const postsApi = {
-  list:    (p?: any) => api.get('/posts', { params: p }).then(r => r.data),
+  list:       (p?: any) => api.get('/posts', { params: p }).then(r => r.data),
+  categories: (sourceId?: string) =>
+    api.get('/posts/categories', { params: sourceId ? { sourceId } : undefined }).then(r => r.data),
   approve: (id: string) => api.patch(`/posts/${id}/approve`).then(r => r.data),
   reject:  (id: string) => api.patch(`/posts/${id}/reject`).then(r => r.data),
   publish: (id: string, siteIds: string[]) =>
     api.post(`/posts/${id}/publish`, { siteIds }).then(r => r.data),
   remove:  (id: string) => api.delete(`/posts/${id}`),
+  update:  (id: string, d: any) => api.patch(`/posts/${id}`, d).then(r => r.data),
 }
 
 export const dashboardApi = {
-  stats: () => api.get('/dashboard/stats').then(r => r.data),
+  stats:  () => api.get('/dashboard/stats').then(r => r.data),
+  queues: () => api.get('/dashboard/queues').then(r => r.data),
 }
 
 export const authApi = {
