@@ -31,19 +31,22 @@ export async function registerSourceSchedulers() {
 
 const sourceBody = z.object({
   name:     z.string().min(1),
-  endpoint: z.string().url(),
-  type:     z.enum(['RSS', 'WP_API']).default('RSS'),
+  endpoint: z.string().min(1),
+  type:     z.enum(['RSS', 'WP_API', 'CUSTOM_API']).default('RSS'),
   enabled:  z.boolean().optional().default(true),
 })
 
 const sourceUpdateBody = z.object({
-  name:     z.string().min(1).optional(),
-  endpoint: z.string().url().optional(),
-  type:     z.enum(['RSS', 'WP_API']).optional(),
-  enabled:  z.boolean().optional(),
-  interval: z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
-  username: z.string().optional(),
-  password: z.string().optional(),
+  name:              z.string().min(1).optional(),
+  endpoint:          z.string().min(1).optional(),
+  type:              z.enum(['RSS', 'WP_API', 'CUSTOM_API']).optional(),
+  enabled:           z.boolean().optional(),
+  interval:          z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
+  username:          z.string().optional(),
+  password:          z.string().optional(),
+  fieldMap:          z.record(z.string()).nullable().optional(),
+  categoryMappings:  z.array(z.object({ id: z.string(), name: z.string() })).nullable().optional(),
+  paginationParam:   z.string().nullable().optional(),
 })
 
 export async function sourcesRoutes(app: FastifyInstance) {
