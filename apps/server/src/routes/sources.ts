@@ -3,12 +3,47 @@ import { z } from 'zod'
 import { fetch } from 'undici'
 import { db } from '../db.js'
 import { fetchQueue, fetchQueueEvents } from '../queue.js'
+import { encrypt } from '../lib/crypto.js'
+
+const INTERVAL_MS: Record<string, number> = {
+  '15m': 900_000,
+  '1h':  3_600_000,
+  '6h':  21_600_000,
+  '24h': 86_400_000,
+}
+
+export async function registerSourceSchedulers() {
+  const sources = await db.source.findMany({
+    where: { interval: { not: null } },
+    select: { id: true, interval: true },
+  })
+  for (const src of sources) {
+    const ms = INTERVAL_MS[src.interval!]
+    if (!ms) continue
+    await fetchQueue.upsertJobScheduler(
+      `fetch-source-${src.id}`,
+      { every: ms },
+      { name: 'fetch-source', data: { sourceId: src.id } },
+    )
+  }
+  if (sources.length) console.log(`[scheduler] Restored ${sources.length} source schedulers`)
+}
 
 const sourceBody = z.object({
   name:     z.string().min(1),
   endpoint: z.string().url(),
   type:     z.enum(['RSS', 'WP_API']).default('RSS'),
   enabled:  z.boolean().optional().default(true),
+})
+
+const sourceUpdateBody = z.object({
+  name:     z.string().min(1).optional(),
+  endpoint: z.string().url().optional(),
+  type:     z.enum(['RSS', 'WP_API']).optional(),
+  enabled:  z.boolean().optional(),
+  interval: z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
+  username: z.string().optional(),
+  password: z.string().optional(),
 })
 
 export async function sourcesRoutes(app: FastifyInstance) {
@@ -27,28 +62,95 @@ export async function sourcesRoutes(app: FastifyInstance) {
         include: { _count: { select: { posts: true } } },
       }),
     ])
-    return { total, pages: Math.ceil(total / query.per_page), page: query.page, items }
+    // Never send password to client
+    const safeItems = items.map(({ password: _pw, ...s }) => s)
+    return { total, pages: Math.ceil(total / query.per_page), page: query.page, items: safeItems }
   })
 
   app.post('/sources', { preHandler: [app.authenticate] }, async (req, reply) => {
     const body = sourceBody.parse(req.body)
     const source = await db.source.create({ data: body })
-    return reply.code(201).send(source)
+    const { password: _pw, ...safe } = source
+    return reply.code(201).send(safe)
   })
 
   app.patch('/sources/:id', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
-    const body = sourceBody.partial().parse(req.body)
-    return db.source.update({ where: { id }, data: body })
+    const body = sourceUpdateBody.parse(req.body)
+
+    const data: Record<string, any> = { ...body }
+
+    // Encrypt password if provided
+    if (body.password !== undefined) {
+      data.password = body.password ? encrypt(body.password) : null
+    }
+
+    const source = await db.source.update({ where: { id }, data })
+
+    // Sync BullMQ scheduler
+    if ('interval' in body) {
+      const schedulerId = `fetch-source-${id}`
+      if (source.interval && INTERVAL_MS[source.interval]) {
+        await fetchQueue.upsertJobScheduler(
+          schedulerId,
+          { every: INTERVAL_MS[source.interval] },
+          { name: 'fetch-source', data: { sourceId: id } },
+        )
+      } else {
+        await fetchQueue.removeJobScheduler(schedulerId).catch(() => { /* ok if not found */ })
+      }
+    }
+
+    const { password: _pw, ...safe } = source
+    return safe
   })
 
   app.delete('/sources/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
+    await fetchQueue.removeJobScheduler(`fetch-source-${id}`).catch(() => { /* ok if not found */ })
     await db.source.delete({ where: { id } })
     return reply.code(204).send()
   })
 
-  // Fetch category list directly from the WP site (WP_API sources) or from stored posts (RSS)
+  // Probe a URL and detect WP_API or RSS feed
+  app.post('/sources/detect', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { url } = z.object({ url: z.string().min(1) }).parse(req.body)
+
+    let base = url.trim()
+    if (!/^https?:\/\//i.test(base)) base = 'https://' + base
+    base = base.replace(/\/$/, '').replace(/\/wp-json.*$/, '')
+    const name = new URL(base).hostname.replace(/^www\./, '')
+
+    const probes: Array<{ path: string; type: 'WP_API' | 'RSS' }> = [
+      { path: '/wp-json/wp/v2/posts?per_page=1&_fields=id', type: 'WP_API' },
+      { path: '/feed',     type: 'RSS' },
+      { path: '/rss',      type: 'RSS' },
+      { path: '/feed.xml', type: 'RSS' },
+      { path: '/atom.xml', type: 'RSS' },
+      { path: '/rss.xml',  type: 'RSS' },
+    ]
+
+    const results = await Promise.allSettled(
+      probes.map(async ({ path, type }) => {
+        const res = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(5000) })
+        if (!res.ok) throw new Error('not ok')
+        if (type === 'WP_API') {
+          const data = await res.json()
+          if (!Array.isArray(data) || !data[0]?.id) throw new Error('not wp')
+          return { type, endpoint: `${base}/wp-json/wp/v2/posts`, name }
+        }
+        const ct = res.headers.get('content-type') ?? ''
+        if (!ct.includes('xml') && !ct.includes('rss') && !ct.includes('atom')) throw new Error('not feed')
+        return { type, endpoint: `${base}${path}`, name }
+      })
+    )
+
+    const hit = results.find(r => r.status === 'fulfilled') as PromiseFulfilledResult<any> | undefined
+    if (!hit) return reply.code(422).send({ error: 'No feed detected at this URL' })
+    return hit.value
+  })
+
+  // Fetch category list directly from the WP site or from stored posts
   app.get('/sources/:id/categories', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
     const source = await db.source.findUniqueOrThrow({ where: { id } })
@@ -64,10 +166,9 @@ export async function sourcesRoutes(app: FastifyInstance) {
           const cats = await res.json() as Array<{ id: number; name: string }>
           return cats.map(c => c.name).sort()
         }
-      } catch { /* fall through to stored categories */ }
+      } catch { /* fall through */ }
     }
 
-    // RSS or WP fallback: return distinct categories from stored posts
     const posts = await db.aggregatedPost.findMany({
       select: { categories: true },
       where: { sourceId: id },
@@ -143,7 +244,6 @@ export async function sourcesRoutes(app: FastifyInstance) {
 
     for (const rawUrl of body.urls) {
       try {
-        // Normalize: add protocol if missing, strip any wp-json path suffix
         let normalized = rawUrl.trim()
         if (!/^https?:\/\//i.test(normalized)) normalized = 'https://' + normalized
         const wpJsonIdx = normalized.indexOf('/wp-json')

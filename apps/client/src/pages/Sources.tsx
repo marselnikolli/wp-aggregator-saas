@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2, Upload, FileUp, ChevronLeft, ChevronRight, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2, Upload, FileUp, ChevronLeft, ChevronRight, CheckCircle, XCircle, Pencil, Search } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { sourcesApi } from '@/lib/api'
@@ -12,6 +12,29 @@ import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+
+const INTERVALS = [
+  { value: '',    label: 'Disabled'      },
+  { value: '15m', label: 'Every 15 min'  },
+  { value: '1h',  label: 'Every hour'    },
+  { value: '6h',  label: 'Every 6 hours' },
+  { value: '24h', label: 'Daily'         },
+]
+
+function DetectButton({ url, onDetect }: { url: string; onDetect: (result: any) => void }) {
+  const detect = useMutation({
+    mutationFn: () => sourcesApi.detect(url),
+    onSuccess: (d) => { onDetect(d); toast.success(`Detected: ${d.type}`) },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Detection failed'),
+  })
+  return (
+    <Button type="button" size="sm" variant="outline" className="shrink-0"
+      onClick={() => detect.mutate()} disabled={!url.trim() || detect.isPending}>
+      {detect.isPending ? <Loader2 className="animate-spin" /> : <Search />}
+      Detect
+    </Button>
+  )
+}
 
 function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
@@ -28,6 +51,15 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to add source'),
   })
 
+  function handleDetect(result: { type: string; endpoint: string; name: string }) {
+    setForm(p => ({
+      ...p,
+      endpoint: result.endpoint,
+      type: result.type as 'RSS' | 'WP_API',
+      name: p.name || result.name,
+    }))
+  }
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
@@ -39,17 +71,18 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
           </div>
           <div className="grid gap-1.5">
             <Label>Endpoint URL</Label>
-            <Input placeholder="https://example.com/feed" value={form.endpoint} onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
+            <div className="flex gap-2">
+              <Input placeholder="https://example.com/feed" value={form.endpoint}
+                onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
+              <DetectButton url={form.endpoint} onDetect={handleDetect} />
+            </div>
           </div>
           <div className="grid gap-1.5">
             <Label>Type</Label>
             <div className="flex gap-2">
               {(['RSS', 'WP_API'] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setForm(p => ({ ...p, type: t }))}
-                  className={`flex-1 rounded-md border py-2 text-sm transition-colors ${form.type === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}
-                >
+                <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
+                  className={`flex-1 rounded-md border py-2 text-sm transition-colors ${form.type === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}>
                   {t === 'RSS' ? 'RSS Feed' : 'WP REST API'}
                 </button>
               ))}
@@ -60,6 +93,104 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => create.mutate()} disabled={create.isPending}>
             {create.isPending && <Loader2 className="animate-spin" />} Add Source
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function EditSourceDialog({ source, onClose }: { source: any; onClose: () => void }) {
+  const qc = useQueryClient()
+  const [form, setForm] = useState({
+    name:     source.name ?? '',
+    endpoint: source.endpoint ?? '',
+    type:     source.type as 'RSS' | 'WP_API',
+    interval: source.interval ?? '',
+    username: source.username ?? '',
+    password: '',
+  })
+
+  const update = useMutation({
+    mutationFn: () => {
+      const body: Record<string, any> = {
+        name:     form.name,
+        endpoint: form.endpoint,
+        type:     form.type,
+        interval: form.interval || null,
+        username: form.username || null,
+      }
+      if (form.password) body.password = form.password
+      return sourcesApi.update(source.id, body)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sources'] })
+      toast.success('Source updated')
+      onClose()
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Update failed'),
+  })
+
+  function handleDetect(result: { type: string; endpoint: string; name: string }) {
+    setForm(p => ({
+      ...p,
+      endpoint: result.endpoint,
+      type: result.type as 'RSS' | 'WP_API',
+      name: p.name || result.name,
+    }))
+  }
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Edit Source</DialogTitle></DialogHeader>
+        <div className="grid gap-4 py-2">
+          <div className="grid gap-1.5">
+            <Label>Name</Label>
+            <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Endpoint URL</Label>
+            <div className="flex gap-2">
+              <Input value={form.endpoint} onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
+              <DetectButton url={form.endpoint} onDetect={handleDetect} />
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Type</Label>
+            <div className="flex gap-2">
+              {(['RSS', 'WP_API'] as const).map(t => (
+                <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
+                  className={`flex-1 rounded-md border py-2 text-sm transition-colors ${form.type === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}>
+                  {t === 'RSS' ? 'RSS Feed' : 'WP REST API'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label>Auto-fetch interval</Label>
+            <select value={form.interval} onChange={e => setForm(p => ({ ...p, interval: e.target.value }))}
+              className="h-9 rounded-md border border-border bg-secondary px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+              {INTERVALS.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label>Username <span className="text-muted-foreground">(optional)</span></Label>
+              <Input value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))}
+                placeholder="wp-user" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label>Password <span className="text-muted-foreground">(optional)</span></Label>
+              <Input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                placeholder={source.username ? 'Leave blank to keep' : 'App password'} />
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => update.mutate()} disabled={update.isPending}>
+            {update.isPending && <Loader2 className="animate-spin" />} Save
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -106,7 +237,6 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Import WordPress Sources</DialogTitle></DialogHeader>
-
         {!results ? (
           <>
             <div className="space-y-3 py-2">
@@ -114,9 +244,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
               <textarea
                 className="w-full h-40 rounded-md border border-border bg-secondary/50 px-3 py-2 text-sm font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring placeholder:text-muted-foreground"
                 placeholder={"https://site1.com\nhttps://site2.com\nhttps://site3.com"}
-                value={text}
-                onChange={e => setText(e.target.value)}
-              />
+                value={text} onChange={e => setText(e.target.value)} />
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
                   <FileUp className="h-4 w-4" />Load .txt file
@@ -158,9 +286,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
                 </div>
               )}
             </div>
-            <DialogFooter>
-              <Button onClick={handleClose}>Done</Button>
-            </DialogFooter>
+            <DialogFooter><Button onClick={handleClose}>Done</Button></DialogFooter>
           </>
         )}
       </DialogContent>
@@ -171,6 +297,7 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
 export function Sources() {
   const [open, setOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [editTarget, setEditTarget] = useState<any>(null)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
@@ -280,6 +407,7 @@ export function Sources() {
 
       <AddSourceDialog open={open} onClose={() => setOpen(false)} />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
+      {editTarget && <EditSourceDialog source={editTarget} onClose={() => setEditTarget(null)} />}
 
       {isLoading ? (
         <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
@@ -297,14 +425,17 @@ export function Sources() {
             {sources.map((src: any) => (
               <Card key={src.id}>
                 <CardContent className="flex items-center justify-between p-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary">
+                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary shrink-0">
                       <Rss className="h-4 w-4 text-muted-foreground" />
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <p className="font-medium text-sm">{src.name}</p>
                         <Badge variant="outline" className="text-xs">{src.type}</Badge>
+                        {src.interval && (
+                          <Badge variant="secondary" className="text-xs">{src.interval}</Badge>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground truncate max-w-sm">{src.endpoint}</p>
                       <p className="text-xs text-muted-foreground">
@@ -312,10 +443,16 @@ export function Sources() {
                           ? `Fetched ${formatDistanceToNow(new Date(src.lastFetch), { addSuffix: true })}`
                           : 'Never fetched'}
                         {' · '}{src._count?.posts ?? 0} posts
+                        {(src.fetchCount > 0 || src.errorCount > 0) && (
+                          <> · <span className="text-emerald-500">{src.fetchCount} ok</span> / <span className="text-red-400">{src.errorCount} err</span></>
+                        )}
                       </p>
+                      {src.fetchStatus === 'ERROR' && src.lastError && (
+                        <p className="text-xs text-red-400 truncate max-w-sm mt-0.5">{src.lastError}</p>
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 shrink-0">
                     <Badge variant={src.fetchStatus === 'OK' ? 'success' : src.fetchStatus === 'ERROR' ? 'destructive' : 'secondary'}>
                       {src.fetchStatus}
                     </Badge>
@@ -323,11 +460,13 @@ export function Sources() {
                       checked={src.enabled}
                       onCheckedChange={(enabled) => toggle.mutate({ id: src.id, enabled })}
                     />
-                    <Button
-                      size="sm" variant="outline"
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => setEditTarget(src)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline"
                       onClick={() => fetchOne.mutate(src.id)}
-                      disabled={fetchOne.isPending || activeJobs[src.id] === 'active'}
-                    >
+                      disabled={fetchOne.isPending || activeJobs[src.id] === 'active'}>
                       {(fetchOne.isPending || activeJobs[src.id] === 'active')
                         ? <Loader2 className="animate-spin" />
                         : activeJobs[src.id] === 'completed'
@@ -337,7 +476,8 @@ export function Sources() {
                         : <Zap />}
                       {activeJobs[src.id] === 'active' ? 'Fetching…' : 'Fetch'}
                     </Button>
-                    <Button size="icon" variant="ghost" onClick={() => remove.mutate(src.id)} className="text-muted-foreground hover:text-destructive">
+                    <Button size="icon" variant="ghost" onClick={() => remove.mutate(src.id)}
+                      className="text-muted-foreground hover:text-destructive">
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
@@ -359,11 +499,8 @@ export function Sources() {
                   <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-              <select
-                value={perPage}
-                onChange={e => { setPerPage(Number(e.target.value)); setPage(1) }}
-                className="h-8 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none"
-              >
+              <select value={perPage} onChange={e => { setPerPage(Number(e.target.value)); setPage(1) }}
+                className="h-8 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none">
                 {[10, 20, 50].map(n => <option key={n} value={n}>{n} / page</option>)}
               </select>
             </div>

@@ -37,6 +37,7 @@ export const sourcesApi = {
   fetchAll:   () => api.post('/sources/fetch-all').then(r => r.data),
   import:     (urls: string[]) => api.post('/sources/import', { urls }).then(r => r.data),
   categories: (id: string) => api.get(`/sources/${id}/categories`).then(r => r.data),
+  detect:     (url: string) => api.post('/sources/detect', { url }).then(r => r.data),
 }
 
 export const postsApi = {

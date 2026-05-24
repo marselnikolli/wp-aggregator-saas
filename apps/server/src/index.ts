@@ -10,7 +10,7 @@ import { db } from './db.js'
 import { authRoutes } from './routes/auth.js'
 import { dashboardRoutes } from './routes/dashboard.js'
 import { sitesRoutes } from './routes/sites.js'
-import { sourcesRoutes } from './routes/sources.js'
+import { sourcesRoutes, registerSourceSchedulers } from './routes/sources.js'
 import { postsRoutes } from './routes/posts.js'
 import { startFetchWorker } from './workers/fetcher.js'
 import { startPublishWorker } from './workers/publisher.js'
@@ -73,6 +73,7 @@ async function bootstrap() {
 
   startFetchWorker()
   startPublishWorker()
+  await registerSourceSchedulers()
 
   await app.listen({ port: config.PORT, host: '0.0.0.0' })
   await seedFirstAdmin()

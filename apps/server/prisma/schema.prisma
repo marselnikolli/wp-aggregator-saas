@@ -38,8 +38,14 @@ model Source {
   endpoint    String
   type        SourceType       @default(RSS)
   enabled     Boolean          @default(true)
+  interval    String?
+  username    String?
+  password    String?
   lastFetch   DateTime?
   fetchStatus FetchStatus      @default(NEVER)
+  lastError   String?
+  fetchCount  Int              @default(0)
+  errorCount  Int              @default(0)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   posts       AggregatedPost[]
@@ -61,6 +67,7 @@ model AggregatedPost {
   originalUrl    String?
   author         String?
   hash           String         @unique
+  categories     String[]       @default([])
   language       String         @default("en")
   aiSummary      String?        @db.Text
   qualityScore   Int?

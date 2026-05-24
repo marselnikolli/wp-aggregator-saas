@@ -50,7 +50,7 @@ export function Dashboard() {
   )
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6 h-full overflow-y-auto">
       <div>
         <h1 className="text-2xl font-bold">Dashboard</h1>
         <p className="text-muted-foreground text-sm mt-1">Overview of your aggregator activity</p>
