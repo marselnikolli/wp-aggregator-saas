@@ -7,6 +7,7 @@ import { redis } from '../queue.js'
 import { db } from '../db.js'
 import { decrypt } from '../lib/crypto.js'
 import { SourceType } from '@prisma/client'
+import { unwrapResponse, resolveDotPath } from '../lib/customApi.js'
 
 const rss = new Parser({ timeout: 10000 })
 
@@ -112,6 +113,57 @@ async function fetchWpApi(endpoint: string, auth?: { username: string; password:
   }))
 }
 
+async function fetchCustomApi(source: {
+  endpoint: string
+  fieldMap: unknown
+  categoryMappings: unknown
+  paginationParam: string | null
+}) {
+  const fieldMap = (source.fieldMap as Record<string, string> | null) ?? {}
+  const categoryMappings = (source.categoryMappings as Array<{ id: string; name: string }> | null) ?? []
+
+  const results: ReturnType<typeof mapRssItem>[] = []
+
+  for (const { id, name } of categoryMappings) {
+    let page = 1
+    while (true) {
+      let url = source.endpoint.replace('{id}', id)
+      if (source.paginationParam) url += `&${source.paginationParam}=${page}`
+
+      let items: unknown[]
+      try {
+        const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+        if (!res.ok) break
+        const data = await res.json()
+        items = unwrapResponse(data)
+      } catch { break }
+
+      if (!items.length) break
+
+      for (const item of items) {
+        const get = (field: string, fallback: string) =>
+          resolveDotPath(fieldMap[field] ?? fallback, item)
+
+        results.push({
+          remoteId:    String(get('remoteId', 'id') ?? Math.random()),
+          title:       String(get('title', 'title') ?? ''),
+          content:     cleanContent(String(get('content', 'content') ?? '')),
+          excerpt:     String(get('excerpt', 'excerpt') ?? '').slice(0, 300),
+          imageUrl:    (get('imageUrl', 'image') as string | null) ?? null,
+          originalUrl: (get('originalUrl', 'url') as string | null) ?? null,
+          author:      (get('author', 'author') as string | null) ?? null,
+          categories:  [name],
+        })
+      }
+
+      if (!source.paginationParam) break
+      page++
+    }
+  }
+
+  return results
+}
+
 async function processSource(sourceId: string): Promise<{ fetched: number; newPosts: number }> {
   const source = await db.source.findUniqueOrThrow({ where: { id: sourceId } })
 
@@ -123,7 +175,9 @@ async function processSource(sourceId: string): Promise<{ fetched: number; newPo
 
   const items = source.type === SourceType.RSS
     ? await fetchRss(source.endpoint, auth)
-    : await fetchWpApi(source.endpoint, auth)
+    : source.type === SourceType.WP_API
+      ? await fetchWpApi(source.endpoint, auth)
+      : await fetchCustomApi(source)
 
   let newPosts = 0
   for (const item of items) {
