@@ -15,6 +15,8 @@ export type AuditAction =
   | 'site.delete'
   | 'settings.update'
   | 'auth.login'
+  | 'auth.totp.enable'
+  | 'auth.totp.disable'
 
 export interface AuditContext {
   userId?:       string

@@ -7,8 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download } from 'lucide-react'
-import { settingsApi, sitesApi } from '@/lib/api'
+import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download, Monitor, ShieldCheck, Languages, Globe, HardDrive } from 'lucide-react'
+import { settingsApi, sitesApi, authApi } from '@/lib/api'
 import { Switch } from '@/components/ui/switch'
 
 interface SettingsData {
@@ -16,6 +16,7 @@ interface SettingsData {
   anthropicKeySet:  boolean
   fetchInterval:    number
   qualityThreshold: number
+  translateTo:      string
 }
 
 function KeyRow({
@@ -179,6 +180,81 @@ export function Settings() {
   })
 
   const [exporting, setExporting] = useState(false)
+
+  // S3/R2 storage
+  const { data: storageData } = useQuery({ queryKey: ['storage'], queryFn: settingsApi.getStorage })
+  const [storageLocal, setStorageLocal] = useState<any>(null)
+  const [storageTestResult, setStorageTestResult] = useState<{ ok: boolean; error?: string } | null>(null)
+  const storage = storageLocal ?? storageData ?? { endpoint: '', region: 'auto', accessKeySet: false, bucket: '', publicUrl: '' }
+  const [storageKeys, setStorageKeys] = useState({ accessKey: '', secretKey: '' })
+  const saveStorage = useMutation({
+    mutationFn: () => settingsApi.saveStorage({
+      endpoint:  storage.endpoint,
+      region:    storage.region,
+      bucket:    storage.bucket,
+      publicUrl: storage.publicUrl,
+      ...(storageKeys.accessKey ? { accessKey: storageKeys.accessKey } : {}),
+      ...(storageKeys.secretKey ? { secretKey: storageKeys.secretKey } : {}),
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['storage'] }); setStorageLocal(null); setStorageKeys({ accessKey: '', secretKey: '' }); toast.success('Storage settings saved') },
+    onError:   () => toast.error('Failed to save storage settings'),
+  })
+  const [testingStorage, setTestingStorage] = useState(false)
+  async function handleTestStorage() {
+    setTestingStorage(true)
+    setStorageTestResult(null)
+    try { setStorageTestResult(await settingsApi.testStorage()) }
+    catch { setStorageTestResult({ ok: false, error: 'Request failed' }) }
+    finally { setTestingStorage(false) }
+  }
+
+  // Translation
+  const [translateTo, setTranslateTo] = useState<string | null>(null)
+  const translateValue = translateTo !== null ? translateTo : (settings?.translateTo ?? '')
+  const saveTranslation = useMutation({
+    mutationFn: () => settingsApi.saveTranslation(translateValue),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setTranslateTo(null); toast.success('Translation setting saved') },
+    onError: () => toast.error('Failed to save'),
+  })
+
+  // Publish pipeline
+  const { data: pipelineData } = useQuery({ queryKey: ['publish-pipeline'], queryFn: settingsApi.getPublishPipeline })
+  const [pipelineLocal, setPipelineLocal] = useState<any>(null)
+  const pipeline = pipelineLocal ?? pipelineData ?? { defaultStatus: 'publish', defaultSiteIds: [], notifications: { onError: false, dailyDigest: false, email: '' } }
+  const savePipeline = useMutation({
+    mutationFn: () => settingsApi.savePublishPipeline(pipeline),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['publish-pipeline'] }); setPipelineLocal(null); toast.success('Pipeline config saved') },
+    onError: () => toast.error('Failed to save'),
+  })
+
+  // Sessions
+  const { data: sessions, refetch: refetchSessions } = useQuery({ queryKey: ['sessions'], queryFn: authApi.sessions })
+  const revokeSession = useMutation({
+    mutationFn: (jti: string) => authApi.revoke(jti),
+    onSuccess: () => { refetchSessions(); toast.success('Session revoked') },
+    onError: () => toast.error('Failed to revoke session'),
+  })
+
+  // 2FA TOTP
+  const { data: meData, refetch: refetchMe } = useQuery({ queryKey: ['me'], queryFn: authApi.me })
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; qrDataUrl: string } | null>(null)
+  const [totpCode, setTotpCode] = useState('')
+  const [disableCode, setDisableCode] = useState('')
+  const setupTotp = useMutation({
+    mutationFn: authApi.setupTotp,
+    onSuccess: (d) => setTotpSetup(d),
+    onError: () => toast.error('Failed to start 2FA setup'),
+  })
+  const enableTotp = useMutation({
+    mutationFn: () => authApi.enableTotp(totpCode),
+    onSuccess: () => { setTotpSetup(null); setTotpCode(''); refetchMe(); toast.success('2FA enabled') },
+    onError: () => toast.error('Invalid code — try again'),
+  })
+  const disableTotp = useMutation({
+    mutationFn: () => authApi.disableTotp(disableCode),
+    onSuccess: () => { setDisableCode(''); refetchMe(); toast.success('2FA disabled') },
+    onError: () => toast.error('Invalid code'),
+  })
 
   async function handleImport(file: File) {
     try {
@@ -519,6 +595,259 @@ export function Settings() {
             {saveIps.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
             Save Allowlist
           </Button>
+        </CardContent>
+      </Card>
+
+      {/* S3/R2 Image Storage */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><HardDrive className="h-4 w-4" />Image Storage (S3 / R2)</CardTitle>
+          <CardDescription>Re-host images in your own S3-compatible bucket. Cloudflare R2 is recommended (no egress fees). Leave blank to use original image URLs.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Endpoint URL</Label>
+              <Input placeholder="https://s3.amazonaws.com or R2 endpoint" value={storage.endpoint}
+                onChange={e => setStorageLocal((p: any) => ({ ...storage, ...p, endpoint: e.target.value }))} className="text-sm font-mono" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Region</Label>
+              <Input placeholder="auto (R2) or us-east-1" value={storage.region}
+                onChange={e => setStorageLocal((p: any) => ({ ...storage, ...p, region: e.target.value }))} className="text-sm font-mono" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Access Key ID</Label>
+              <Input type="password" placeholder={storage.accessKeySet ? '•••••• (enter to replace)' : 'Access key…'}
+                value={storageKeys.accessKey} onChange={e => setStorageKeys(p => ({ ...p, accessKey: e.target.value }))} className="text-sm font-mono" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Secret Access Key</Label>
+              <Input type="password" placeholder="Secret key…"
+                value={storageKeys.secretKey} onChange={e => setStorageKeys(p => ({ ...p, secretKey: e.target.value }))} className="text-sm font-mono" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Bucket Name</Label>
+              <Input placeholder="my-images-bucket" value={storage.bucket}
+                onChange={e => setStorageLocal((p: any) => ({ ...storage, ...p, bucket: e.target.value }))} className="text-sm font-mono" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Public URL prefix <span className="text-muted-foreground">(optional)</span></Label>
+              <Input placeholder="https://images.example.com" value={storage.publicUrl}
+                onChange={e => setStorageLocal((p: any) => ({ ...storage, ...p, publicUrl: e.target.value }))} className="text-sm font-mono" />
+            </div>
+          </div>
+          {storageTestResult && (
+            <p className={`text-xs flex items-center gap-1.5 ${storageTestResult.ok ? 'text-green-600' : 'text-destructive'}`}>
+              {storageTestResult.ok
+                ? <><CheckCircle2 className="h-3.5 w-3.5" /> Connection successful</>
+                : <><XCircle className="h-3.5 w-3.5" /> {storageTestResult.error}</>
+              }
+            </p>
+          )}
+          <div className="flex gap-2">
+            <Button size="sm" disabled={saveStorage.isPending || storageLocal === null} onClick={() => saveStorage.mutate()}>
+              {saveStorage.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
+              Save
+            </Button>
+            <Button size="sm" variant="outline" disabled={testingStorage || !storageData?.bucket} onClick={handleTestStorage}>
+              {testingStorage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Test connection'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* AI Translation */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Languages className="h-4 w-4" />AI Translation</CardTitle>
+          <CardDescription>Automatically translate fetched content to a target language using the configured AI provider</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-1.5">
+            <Label>Translate to language</Label>
+            <div className="flex gap-2">
+              <Input
+                placeholder="e.g. English, Albanian, Spanish… (leave blank to disable)"
+                value={translateValue}
+                onChange={e => setTranslateTo(e.target.value)}
+                className="text-sm"
+              />
+              <Button size="sm" disabled={saveTranslation.isPending || translateTo === null} onClick={() => saveTranslation.mutate()}>
+                {saveTranslation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
+              </Button>
+              {translateValue && (
+                <Button size="sm" variant="ghost" className="text-destructive" onClick={() => { setTranslateTo(''); saveTranslation.mutate() }}>
+                  <XIcon className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">Only posts where the detected language differs from the target are translated. The AI-rewritten title and summary are stored as translated versions.</p>
+        </CardContent>
+      </Card>
+
+      {/* Default Publishing Pipeline */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Globe className="h-4 w-4" />Default Publishing Pipeline</CardTitle>
+          <CardDescription>Default post status and target sites when manually publishing. Also configure notification preferences.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Default post status</Label>
+            <div className="flex gap-2">
+              {(['publish', 'draft'] as const).map(s => (
+                <button key={s} type="button"
+                  onClick={() => setPipelineLocal((p: any) => ({ ...pipeline, ...p, defaultStatus: s }))}
+                  className={`flex-1 rounded-md border py-2 px-3 text-sm font-medium transition-colors ${pipeline.defaultStatus === s ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-foreground/40'}`}>
+                  {s === 'publish' ? 'Publish immediately' : 'Save as draft'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Default target sites</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {(sites ?? []).map((site: any) => {
+                const active = pipeline.defaultSiteIds.includes(site.id)
+                return (
+                  <button key={site.id} type="button"
+                    onClick={() => setPipelineLocal((p: any) => ({
+                      ...pipeline, ...p,
+                      defaultSiteIds: active
+                        ? pipeline.defaultSiteIds.filter((id: string) => id !== site.id)
+                        : [...pipeline.defaultSiteIds, site.id],
+                    }))}
+                    className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${active ? 'bg-primary/10 border-primary text-primary' : 'border-border text-muted-foreground hover:border-foreground/40'}`}>
+                    {site.name}
+                  </button>
+                )
+              })}
+              {!(sites ?? []).length && <p className="text-xs text-muted-foreground">No sites configured yet</p>}
+            </div>
+          </div>
+          <Separator />
+          <div className="space-y-3">
+            <Label className="text-xs text-muted-foreground uppercase tracking-wide">Notifications</Label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium">Email on fetch error</p>
+                <p className="text-xs text-muted-foreground">Send an email when a source repeatedly fails</p>
+              </div>
+              <Switch checked={pipeline.notifications.onError}
+                onCheckedChange={v => setPipelineLocal((p: any) => ({ ...pipeline, ...p, notifications: { ...pipeline.notifications, onError: v } }))} />
+            </label>
+            <label className="flex items-center justify-between cursor-pointer">
+              <div>
+                <p className="text-sm font-medium">Daily digest email</p>
+                <p className="text-xs text-muted-foreground">Summary of new posts, publish stats, and errors each morning</p>
+              </div>
+              <Switch checked={pipeline.notifications.dailyDigest}
+                onCheckedChange={v => setPipelineLocal((p: any) => ({ ...pipeline, ...p, notifications: { ...pipeline.notifications, dailyDigest: v } }))} />
+            </label>
+            {(pipeline.notifications.onError || pipeline.notifications.dailyDigest) && (
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Notification email</Label>
+                <Input type="email" placeholder="you@example.com" value={pipeline.notifications.email} className="text-sm"
+                  onChange={e => setPipelineLocal((p: any) => ({ ...pipeline, ...p, notifications: { ...pipeline.notifications, email: e.target.value } }))} />
+              </div>
+            )}
+          </div>
+          <Button size="sm" disabled={savePipeline.isPending || pipelineLocal === null} onClick={() => savePipeline.mutate()}>
+            {savePipeline.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
+            Save Pipeline Config
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Session Management */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Monitor className="h-4 w-4" />Active Sessions</CardTitle>
+          <CardDescription>Review and revoke active login sessions for your account</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {!sessions?.length && <p className="text-sm text-muted-foreground">No active sessions found.</p>}
+          {sessions?.map((s: any) => (
+            <div key={s.jti} className="flex items-start justify-between rounded-md border border-border px-3 py-2.5 gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-mono truncate">{s.ua ? s.ua.slice(0, 50) + (s.ua.length > 50 ? '…' : '') : 'Unknown client'}</p>
+                  {s.current && <Badge variant="secondary" className="text-xs shrink-0">Current</Badge>}
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  IP: {s.ip || 'unknown'} · Expires {s.expiresIn > 0 ? `in ${Math.round(s.expiresIn / 3600)}h` : 'soon'}
+                </p>
+              </div>
+              {!s.current && (
+                <Button size="sm" variant="ghost" className="text-destructive shrink-0"
+                  disabled={revokeSession.isPending}
+                  onClick={() => revokeSession.mutate(s.jti)}>
+                  Revoke
+                </Button>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+
+      {/* Two-Factor Authentication */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="h-4 w-4" />Two-Factor Authentication (TOTP)</CardTitle>
+          <CardDescription>
+            {meData?.totpEnabled ? '2FA is enabled. Use your authenticator app to generate codes.' : 'Add an extra layer of security to your account.'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {meData?.totpEnabled ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-sm text-green-600">
+                <CheckCircle2 className="h-4 w-4" /> 2FA is active
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Enter code to disable</Label>
+                <div className="flex gap-2">
+                  <Input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={disableCode}
+                    onChange={e => setDisableCode(e.target.value.replace(/\D/g, ''))} className="w-32 font-mono text-sm tracking-widest" />
+                  <Button size="sm" variant="destructive" disabled={disableCode.length !== 6 || disableTotp.isPending}
+                    onClick={() => disableTotp.mutate()}>
+                    {disableTotp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Disable 2FA'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : totpSetup ? (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">Scan this QR code with your authenticator app</p>
+                <img src={totpSetup.qrDataUrl} alt="QR code" className="w-44 h-44 rounded-md border border-border" />
+                <p className="text-xs text-muted-foreground">Or enter the secret manually:</p>
+                <p className="font-mono text-xs break-all bg-secondary rounded px-2 py-1">{totpSetup.secret}</p>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Verify — enter the 6-digit code from your app</Label>
+                <div className="flex gap-2">
+                  <Input type="text" inputMode="numeric" maxLength={6} placeholder="000000" value={totpCode}
+                    onChange={e => setTotpCode(e.target.value.replace(/\D/g, ''))} className="w-32 font-mono text-sm tracking-widest" />
+                  <Button size="sm" disabled={totpCode.length !== 6 || enableTotp.isPending} onClick={() => enableTotp.mutate()}>
+                    {enableTotp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Verify & Enable'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setTotpSetup(null); setTotpCode('') }}>Cancel</Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <Button size="sm" disabled={setupTotp.isPending} onClick={() => setupTotp.mutate()}>
+              {setupTotp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />}
+              Set up 2FA
+            </Button>
+          )}
         </CardContent>
       </Card>
 

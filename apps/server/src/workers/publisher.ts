@@ -4,6 +4,7 @@ import { redis } from '../queue.js'
 import { db } from '../db.js'
 import { WPClient } from '../lib/wp-client.js'
 import { decrypt } from '../lib/crypto.js'
+import { uploadImage } from '../lib/image-storage.js'
 
 export interface PublishJobData {
   publishTaskId: string
@@ -66,34 +67,56 @@ async function runPublishTask(taskId: string) {
   if (task.post.imageUrl) {
     const img = await downloadImage(task.post.imageUrl)
     if (img) {
+      // Try to re-host image in S3/R2 storage first
+      const storedUrl = await uploadImage(img.buffer, img.mimeType, task.post.imageUrl)
+      const imageSource = storedUrl
+        ? { buffer: img.buffer, mimeType: img.mimeType, filename: img.filename }
+        : img
       try {
-        const media = await client.uploadMedia(img)
+        const media = await client.uploadMedia(imageSource)
         featuredMediaId = media.id
+        // Persist stored URL so re-publish uses it directly
+        if (storedUrl && storedUrl !== task.post.imageUrl) {
+          await db.aggregatedPost.update({
+            where: { id: task.post.id },
+            data:  { imageUrl: storedUrl },
+          })
+        }
       } catch (err) {
         console.warn(`[publish-worker] image upload failed for task ${taskId}:`, (err as Error).message)
       }
     }
   }
 
-  // Source-level category mapping: { siteId: { remoteCategory: localCategory } }
-  const catMapForSite = ((task.post.source?.categoryMap as Record<string, Record<string, string>> | null)?.[task.site.id]) ?? {}
-
   const categoryIds: number[] = []
   const tagIds: number[]      = []
-  for (const remoteName of task.post.categories) {
-    const localName = catMapForSite[remoteName] ?? remoteName
-    try { categoryIds.push(await client.getOrCreateCategory(localName)) }
-    catch (err) { console.warn(`[publish-worker] category "${localName}" failed:`, (err as Error).message) }
-    try { tagIds.push(await client.getOrCreateTag(localName)) }
-    catch { /* tags are best-effort */ }
-  }
-  if (task.site.defaultCategory) {
-    try {
-      const id = await client.getOrCreateCategory(task.site.defaultCategory)
-      if (!categoryIds.includes(id)) categoryIds.push(id)
-    } catch (err) {
-      console.warn(`[publish-worker] default category failed:`, (err as Error).message)
+
+  if (task.categoryOverride) {
+    // Per-publish override wins over everything
+    try { categoryIds.push(await client.getOrCreateCategory(task.categoryOverride)) }
+    catch (err) { console.warn(`[publish-worker] category override "${task.categoryOverride}" failed:`, (err as Error).message) }
+  } else {
+    // Source-level category mapping: { siteId: { remoteCategory: localCategory } }
+    const catMapForSite = ((task.post.source?.categoryMap as Record<string, Record<string, string>> | null)?.[task.site.id]) ?? {}
+    for (const remoteName of task.post.categories) {
+      const localName = catMapForSite[remoteName] ?? remoteName
+      try { categoryIds.push(await client.getOrCreateCategory(localName)) }
+      catch (err) { console.warn(`[publish-worker] category "${localName}" failed:`, (err as Error).message) }
     }
+    if (task.site.defaultCategory) {
+      try {
+        const id = await client.getOrCreateCategory(task.site.defaultCategory)
+        if (!categoryIds.includes(id)) categoryIds.push(id)
+      } catch (err) {
+        console.warn(`[publish-worker] default category failed:`, (err as Error).message)
+      }
+    }
+  }
+
+  const tagSources = task.tagOverrides?.length ? task.tagOverrides : task.post.categories
+  for (const name of tagSources) {
+    try { tagIds.push(await client.getOrCreateTag(name)) }
+    catch { /* tags are best-effort */ }
   }
 
   const wpStatus = (task.wpStatus ?? 'publish') as 'publish' | 'draft' | 'future'

@@ -4,8 +4,9 @@ import { fetch } from 'undici'
 import { db } from '../db.js'
 import { encrypt, decrypt } from '../lib/crypto.js'
 import { applyScheduledPublishSettings } from '../workers/schedPublisher.js'
+import { testStorageConnection } from '../lib/image-storage.js'
 
-const ENCRYPTED = new Set(['openai_key', 'anthropic_key'])
+const ENCRYPTED = new Set(['openai_key', 'anthropic_key', 's3_secret_key', 's3_access_key'])
 
 async function getSetting(key: string): Promise<string | null> {
   const row = await db.setting.findUnique({ where: { key } })
@@ -28,18 +29,32 @@ export async function getSettingValue(key: string): Promise<string | null> {
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/settings', { onRequest: [app.authenticate] }, async () => {
-    const [openai, anthropic, interval, threshold] = await Promise.all([
+    const [openai, anthropic, interval, threshold, translateTo] = await Promise.all([
       db.setting.findUnique({ where: { key: 'openai_key' } }),
       db.setting.findUnique({ where: { key: 'anthropic_key' } }),
       db.setting.findUnique({ where: { key: 'fetch_interval' } }),
       db.setting.findUnique({ where: { key: 'quality_threshold' } }),
+      db.setting.findUnique({ where: { key: 'translate_to' } }),
     ])
     return {
       openaiKeySet:     !!openai,
       anthropicKeySet:  !!anthropic,
       fetchInterval:    interval  ? Number(interval.value)  : 60,
       qualityThreshold: threshold ? Number(threshold.value) : 0,
+      translateTo:      translateTo?.value ?? '',
     }
+  })
+
+  app.post('/settings/translation', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const { translateTo } = z.object({
+      translateTo: z.string(), // e.g. 'English', 'Albanian', or '' to disable
+    }).parse(req.body)
+    if (translateTo) {
+      await setSetting('translate_to', translateTo)
+    } else {
+      await db.setting.deleteMany({ where: { key: 'translate_to' } })
+    }
+    reply.code(204).send()
   })
 
   app.post('/settings/ai-keys', { onRequest: [app.authenticate] }, async (req, reply) => {
@@ -203,6 +218,91 @@ export async function settingsRoutes(app: FastifyInstance) {
 
     await applyScheduledPublishSettings()
     return { ok: true }
+  })
+
+  // S3/R2 image storage settings
+  app.get('/settings/storage', { onRequest: [app.authenticate] }, async () => {
+    const [endpoint, region, accessKey, bucket, publicUrl] = await Promise.all([
+      db.setting.findUnique({ where: { key: 's3_endpoint' } }),
+      db.setting.findUnique({ where: { key: 's3_region' } }),
+      db.setting.findUnique({ where: { key: 's3_access_key' } }),
+      db.setting.findUnique({ where: { key: 's3_bucket' } }),
+      db.setting.findUnique({ where: { key: 's3_public_url' } }),
+    ])
+    return {
+      endpoint:      endpoint?.value ?? '',
+      region:        region?.value  ?? 'auto',
+      accessKeySet:  !!accessKey,
+      bucket:        bucket?.value  ?? '',
+      publicUrl:     publicUrl?.value ?? '',
+    }
+  })
+
+  app.post('/settings/storage', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const body = z.object({
+      endpoint:     z.string(),
+      region:       z.string().optional(),
+      accessKey:    z.string().optional(),
+      secretKey:    z.string().optional(),
+      bucket:       z.string(),
+      publicUrl:    z.string().optional(),
+    }).parse(req.body)
+    await Promise.all([
+      body.endpoint  !== undefined ? setSetting('s3_endpoint',   body.endpoint)  : null,
+      body.region    !== undefined ? setSetting('s3_region',     body.region)    : null,
+      body.accessKey !== undefined ? setSetting('s3_access_key', body.accessKey) : null,
+      body.secretKey !== undefined ? setSetting('s3_secret_key', body.secretKey) : null,
+      body.bucket    !== undefined ? setSetting('s3_bucket',     body.bucket)    : null,
+      body.publicUrl !== undefined ? setSetting('s3_public_url', body.publicUrl) : null,
+    ])
+    reply.code(204).send()
+  })
+
+  app.post('/settings/storage/test', { onRequest: [app.authenticate] }, async () => {
+    return testStorageConnection()
+  })
+
+  // Default publishing pipeline config
+  app.get('/settings/publish-pipeline', { onRequest: [app.authenticate] }, async () => {
+    const [statusRow, siteIdsRow, notifErrorRow, notifDigestRow, notifEmailRow] = await Promise.all([
+      db.setting.findUnique({ where: { key: 'pipeline_default_status' } }),
+      db.setting.findUnique({ where: { key: 'pipeline_default_site_ids' } }),
+      db.setting.findUnique({ where: { key: 'notif_on_error' } }),
+      db.setting.findUnique({ where: { key: 'notif_daily_digest' } }),
+      db.setting.findUnique({ where: { key: 'notif_email' } }),
+    ])
+    return {
+      defaultStatus:  (statusRow?.value ?? 'publish') as 'publish' | 'draft',
+      defaultSiteIds: siteIdsRow ? JSON.parse(siteIdsRow.value) : [],
+      notifications: {
+        onError:     notifErrorRow?.value === 'true',
+        dailyDigest: notifDigestRow?.value === 'true',
+        email:       notifEmailRow?.value ?? '',
+      },
+    }
+  })
+
+  app.post('/settings/publish-pipeline', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const body = z.object({
+      defaultStatus:  z.enum(['publish', 'draft']).optional(),
+      defaultSiteIds: z.array(z.string()).optional(),
+      notifications: z.object({
+        onError:     z.boolean(),
+        dailyDigest: z.boolean(),
+        email:       z.string().email().or(z.literal('')),
+      }).optional(),
+    }).parse(req.body)
+
+    const ops = []
+    if (body.defaultStatus  !== undefined) ops.push(setSetting('pipeline_default_status',   body.defaultStatus))
+    if (body.defaultSiteIds !== undefined) ops.push(setSetting('pipeline_default_site_ids', JSON.stringify(body.defaultSiteIds)))
+    if (body.notifications) {
+      ops.push(setSetting('notif_on_error',     String(body.notifications.onError)))
+      ops.push(setSetting('notif_daily_digest', String(body.notifications.dailyDigest)))
+      ops.push(setSetting('notif_email',        body.notifications.email))
+    }
+    await Promise.all(ops)
+    reply.code(204).send()
   })
 
   app.get('/settings/export', { onRequest: [app.authenticate] }, async (_req, reply) => {

@@ -8,14 +8,16 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  password  String
-  name      String?
-  role      String   @default("admin")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  apiKeys   ApiKey[]
+  id          String   @id @default(cuid())
+  email       String   @unique
+  password    String
+  name        String?
+  role        String   @default("admin")
+  totpSecret  String?
+  totpEnabled Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  apiKeys     ApiKey[]
 }
 
 model ApiKey {
@@ -94,10 +96,12 @@ model AggregatedPost {
   hash           String         @unique
   categories     String[]       @default([])
   language       String         @default("en")
-  aiSummary      String?        @db.Text
-  aiTitle        String?
-  qualityScore   Int?
-  approvalStatus ApprovalStatus @default(PENDING)
+  aiSummary         String?        @db.Text
+  aiTitle           String?
+  qualityScore      Int?
+  embedding         String?        @db.Text
+  semanticDupOf     String?
+  approvalStatus    ApprovalStatus @default(PENDING)
   publishStatus  PublishStatus  @default(DRAFT)
   scheduledDate  DateTime?
   publishedDate  DateTime?
@@ -115,19 +119,21 @@ model AggregatedPost {
 }
 
 model PublishTask {
-  id            String         @id @default(cuid())
-  postId        String
-  post          AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  siteId        String
-  site          Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  status        TaskStatus     @default(PENDING)
-  wpStatus      String         @default("publish")
-  scheduledDate DateTime?
-  wpPostId      Int?
-  error         String?
-  attempts      Int            @default(0)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id               String         @id @default(cuid())
+  postId           String
+  post             AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  siteId           String
+  site             Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  status           TaskStatus     @default(PENDING)
+  wpStatus         String         @default("publish")
+  scheduledDate    DateTime?
+  wpPostId         Int?
+  categoryOverride String?
+  tagOverrides     String[]       @default([])
+  error            String?
+  attempts         Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
   @@unique([postId, siteId])
   @@index([status])

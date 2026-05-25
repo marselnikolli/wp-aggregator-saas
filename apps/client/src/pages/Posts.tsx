@@ -47,20 +47,43 @@ const WP_STATUS_OPTIONS = [
   { value: 'future',  label: 'Schedule',      desc: 'Publish at a specific time' },
 ] as const
 
+interface SiteTarget {
+  siteId:           string
+  wpStatus:         'publish' | 'draft' | 'future'
+  scheduleAt:       string
+  categoryOverride: string
+  tagOverrides:     string
+}
+
 function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
-  const [selected, setSelected]     = useState<string[]>([])
-  const [wpStatus, setWpStatus]     = useState<'publish' | 'draft' | 'future'>('publish')
-  const [scheduleAt, setScheduleAt] = useState('')
+  const [targets,     setTargets]     = useState<Record<string, SiteTarget>>({})
+  const [expandedId,  setExpandedId]  = useState<string | null>(null)
   const { data: sites } = useQuery({ queryKey: ['sites'], queryFn: sitesApi.list })
   const qc = useQueryClient()
 
+  const toggle = (siteId: string, checked: boolean) => {
+    if (checked) {
+      setTargets(p => ({ ...p, [siteId]: { siteId, wpStatus: 'publish', scheduleAt: '', categoryOverride: '', tagOverrides: '' } }))
+    } else {
+      setTargets(p => { const n = { ...p }; delete n[siteId]; return n })
+      if (expandedId === siteId) setExpandedId(null)
+    }
+  }
+
+  const update = (siteId: string, field: keyof SiteTarget, value: string) =>
+    setTargets(p => ({ ...p, [siteId]: { ...p[siteId], [field]: value } }))
+
+  const selected = Object.values(targets)
+  const canSubmit = selected.length > 0 && selected.every(t => t.wpStatus !== 'future' || !!t.scheduleAt)
+
   const publish = useMutation({
-    mutationFn: () => {
-      const isoDate = wpStatus === 'future' && scheduleAt
-        ? new Date(scheduleAt).toISOString()
-        : undefined
-      return postsApi.publish(post.id, selected, wpStatus, isoDate)
-    },
+    mutationFn: () => postsApi.publish(post.id, selected.map(t => ({
+      siteId:           t.siteId,
+      wpStatus:         t.wpStatus,
+      scheduledDate:    t.wpStatus === 'future' && t.scheduleAt ? new Date(t.scheduleAt).toISOString() : undefined,
+      categoryOverride: t.categoryOverride || undefined,
+      tagOverrides:     t.tagOverrides ? t.tagOverrides.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+    }))),
     onSuccess: (d) => {
       toast.success(`Queued for ${d.queued} site(s)`)
       qc.invalidateQueries({ queryKey: ['posts'] })
@@ -69,58 +92,73 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Publish failed'),
   })
 
-  const canSubmit = selected.length > 0 && (wpStatus !== 'future' || !!scheduleAt)
-
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Publish to Sites</DialogTitle></DialogHeader>
-        <div className="space-y-4 py-2">
+        <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
           <p className="text-sm text-muted-foreground">Destination for: <strong>{post?.title}</strong></p>
 
-          {/* Site selection */}
-          <div className="space-y-2">
-            {sites?.map((site: any) => (
-              <label key={site.id} className="flex items-center gap-3 rounded-md border border-border p-3 cursor-pointer hover:bg-secondary/50">
-                <Switch
-                  checked={selected.includes(site.id)}
-                  onCheckedChange={(c) => setSelected(p => c ? [...p, site.id] : p.filter(i => i !== site.id))}
-                />
-                <div>
-                  <p className="text-sm font-medium">{site.name}</p>
-                  <p className="text-xs text-muted-foreground">{site.url}</p>
-                </div>
-              </label>
-            ))}
-          </div>
-
-          {/* Status */}
-          <div className="grid gap-1.5">
-            <Label>Status</Label>
-            <div className="flex gap-2">
-              {WP_STATUS_OPTIONS.map(opt => (
-                <button key={opt.value} type="button" onClick={() => setWpStatus(opt.value)}
-                  className={`flex-1 rounded-md border py-2 px-1 text-xs transition-colors text-center ${wpStatus === opt.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}>
-                  <span className="block font-medium text-sm">{opt.label}</span>
-                  <span className="block text-[11px] opacity-70">{opt.desc}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {wpStatus === 'future' && (
-            <div className="grid gap-1.5">
-              <Label>Schedule date &amp; time</Label>
-              <input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)}
-                className="h-9 rounded-md border border-border bg-secondary px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-            </div>
-          )}
+          {sites?.map((site: any) => {
+            const t = targets[site.id]
+            const checked = !!t
+            const expanded = expandedId === site.id
+            return (
+              <div key={site.id} className="rounded-md border border-border overflow-hidden">
+                <label className="flex items-center gap-3 p-3 cursor-pointer hover:bg-secondary/50">
+                  <Switch checked={checked} onCheckedChange={(c) => toggle(site.id, c)} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{site.name}</p>
+                    <p className="text-xs text-muted-foreground truncate">{site.url}</p>
+                  </div>
+                  {checked && (
+                    <button type="button" onClick={(e) => { e.preventDefault(); setExpandedId(expanded ? null : site.id) }}
+                      className="text-xs text-muted-foreground hover:text-foreground px-1">
+                      {expanded ? 'Hide' : 'Options'}
+                    </button>
+                  )}
+                </label>
+                {checked && expanded && (
+                  <div className="border-t border-border bg-secondary/30 px-3 pb-3 pt-2 space-y-2.5">
+                    <div>
+                      <Label className="text-xs">Status</Label>
+                      <div className="flex gap-1.5 mt-1">
+                        {WP_STATUS_OPTIONS.map(opt => (
+                          <button key={opt.value} type="button" onClick={() => update(site.id, 'wpStatus', opt.value)}
+                            className={`flex-1 rounded border py-1 text-[11px] transition-colors ${t.wpStatus === opt.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground'}`}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {t.wpStatus === 'future' && (
+                      <div>
+                        <Label className="text-xs">Schedule</Label>
+                        <input type="datetime-local" value={t.scheduleAt} onChange={e => update(site.id, 'scheduleAt', e.target.value)}
+                          className="mt-1 h-8 w-full rounded border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring" />
+                      </div>
+                    )}
+                    <div>
+                      <Label className="text-xs">Category override <span className="text-muted-foreground">(optional)</span></Label>
+                      <Input className="mt-1 h-8 text-xs" placeholder="e.g. Technology" value={t.categoryOverride}
+                        onChange={e => update(site.id, 'categoryOverride', e.target.value)} />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Tag overrides <span className="text-muted-foreground">(comma-separated)</span></Label>
+                      <Input className="mt-1 h-8 text-xs" placeholder="e.g. news, albania" value={t.tagOverrides}
+                        onChange={e => update(site.id, 'tagOverrides', e.target.value)} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => publish.mutate()} disabled={!canSubmit || publish.isPending}>
             {publish.isPending && <Loader2 className="animate-spin" />}
-            {wpStatus === 'draft' ? 'Save draft' : wpStatus === 'future' ? 'Schedule' : `Publish to ${selected.length} site${selected.length !== 1 ? 's' : ''}`}
+            {`Publish to ${selected.length} site${selected.length !== 1 ? 's' : ''}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -498,6 +536,9 @@ export function Posts() {
                       <Badge variant="outline" className={`text-xs ${selected.qualityScore >= 60 ? 'text-emerald-400 border-emerald-500/30' : selected.qualityScore >= 30 ? 'text-yellow-400 border-yellow-500/30' : 'text-muted-foreground'}`}>
                         Q:{selected.qualityScore}
                       </Badge>
+                    )}
+                    {selected.semanticDupOf && (
+                      <Badge variant="outline" className="text-xs text-orange-400 border-orange-500/30">Semantic dup</Badge>
                     )}
                   </div>
                 </div>

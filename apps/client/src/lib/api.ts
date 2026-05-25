@@ -50,8 +50,8 @@ export const postsApi = {
     api.get('/posts/categories', { params: sourceId ? { sourceId } : undefined }).then(r => r.data),
   approve: (id: string) => api.patch(`/posts/${id}/approve`).then(r => r.data),
   reject:  (id: string) => api.patch(`/posts/${id}/reject`).then(r => r.data),
-  publish: (id: string, siteIds: string[], wpStatus: 'publish' | 'draft' | 'future' = 'publish', scheduledDate?: string) =>
-    api.post(`/posts/${id}/publish`, { siteIds, wpStatus, ...(scheduledDate ? { scheduledDate } : {}) }).then(r => r.data),
+  publish: (id: string, sites: Array<{ siteId: string; wpStatus?: 'publish' | 'draft' | 'future'; scheduledDate?: string; categoryOverride?: string; tagOverrides?: string[] }>) =>
+    api.post(`/posts/${id}/publish`, { sites }).then(r => r.data),
   remove:  (id: string) => api.delete(`/posts/${id}`),
   update:  (id: string, d: any) => api.patch(`/posts/${id}`, d).then(r => r.data),
 }
@@ -74,6 +74,7 @@ export const settingsApi = {
   getBlocklist:       () => api.get('/settings/blocklist').then(r => r.data),
   saveBlocklist:      (words: string[]) => api.post('/settings/blocklist', { words }),
   saveQualityThreshold: (threshold: number) => api.post('/settings/quality-threshold', { threshold }),
+  saveTranslation:      (translateTo: string) => api.post('/settings/translation', { translateTo }),
   exportData:       () => api.get('/settings/export', { responseType: 'blob' }).then(r => r.data),
   importData:       (data: any) => api.post('/settings/import', data).then(r => r.data),
   getWebhook:           () => api.get('/settings/webhook').then(r => r.data),
@@ -82,6 +83,11 @@ export const settingsApi = {
   saveScheduledPublish: (d: any) => api.post('/settings/scheduled-publish', d).then(r => r.data),
   getIpAllowlist:       () => api.get('/settings/ip-allowlist').then(r => r.data),
   saveIpAllowlist:      (ips: string[]) => api.post('/settings/ip-allowlist', { ips }),
+  getPublishPipeline:   () => api.get('/settings/publish-pipeline').then(r => r.data),
+  savePublishPipeline:  (d: any) => api.post('/settings/publish-pipeline', d),
+  getStorage:           () => api.get('/settings/storage').then(r => r.data),
+  saveStorage:          (d: any) => api.post('/settings/storage', d),
+  testStorage:          () => api.post('/settings/storage/test').then(r => r.data),
 }
 
 export const auditApi = {
@@ -89,11 +95,14 @@ export const auditApi = {
 }
 
 export const authApi = {
-  login:    (email: string, password: string) =>
-    api.post('/auth/login', { email, password }).then(r => r.data),
-  me:       () => api.get('/auth/me').then(r => r.data),
-  sessions: () => api.get('/auth/sessions').then(r => r.data),
-  revoke:   (jti: string) => api.delete(`/auth/sessions/${jti}`),
+  login:         (email: string, password: string, totpCode?: string) =>
+    api.post('/auth/login', { email, password, ...(totpCode ? { totpCode } : {}) }).then(r => r.data),
+  me:            () => api.get('/auth/me').then(r => r.data),
+  sessions:      () => api.get('/auth/sessions').then(r => r.data),
+  revoke:        (jti: string) => api.delete(`/auth/sessions/${jti}`),
+  setupTotp:     () => api.post('/auth/totp/setup').then(r => r.data),
+  enableTotp:    (code: string) => api.post('/auth/totp/enable', { code }).then(r => r.data),
+  disableTotp:   (code: string) => api.post('/auth/totp/disable', { code }).then(r => r.data),
 }
 
 export const apiKeysApi = {

@@ -71,14 +71,37 @@ export async function postsRoutes(app: FastifyInstance) {
 
   app.post('/posts/:id/publish', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const body = z.object({
+
+    // Support both legacy { siteIds } and new { sites: [{ siteId, wpStatus, categoryOverride, tagOverrides }] }
+    const legacySchema = z.object({
       siteIds:       z.array(z.string()).min(1),
       wpStatus:      z.enum(['publish', 'draft', 'future']).default('publish'),
       scheduledDate: z.string().datetime().optional(),
-    }).parse(req.body)
+    })
+    const perSiteSchema = z.object({
+      sites: z.array(z.object({
+        siteId:           z.string(),
+        wpStatus:         z.enum(['publish', 'draft', 'future']).default('publish'),
+        scheduledDate:    z.string().datetime().optional(),
+        categoryOverride: z.string().optional(),
+        tagOverrides:     z.array(z.string()).optional(),
+      })).min(1),
+    })
 
-    if (body.wpStatus === 'future' && !body.scheduledDate) {
-      return reply.code(422).send({ error: 'scheduledDate required when wpStatus is "future"' })
+    type SiteTarget = { siteId: string; wpStatus: 'publish' | 'draft' | 'future'; scheduledDate?: string; categoryOverride?: string; tagOverrides?: string[] }
+    let targets: SiteTarget[]
+    try {
+      const p = perSiteSchema.parse(req.body)
+      targets = p.sites
+    } catch {
+      const p = legacySchema.parse(req.body)
+      targets = p.siteIds.map(siteId => ({ siteId, wpStatus: p.wpStatus, scheduledDate: p.scheduledDate }))
+    }
+
+    for (const t of targets) {
+      if (t.wpStatus === 'future' && !t.scheduledDate) {
+        return reply.code(422).send({ error: `scheduledDate required for site ${t.siteId} when wpStatus is "future"` })
+      }
     }
 
     const post = await db.aggregatedPost.findUniqueOrThrow({ where: { id } })
@@ -88,25 +111,32 @@ export async function postsRoutes(app: FastifyInstance) {
 
     const jwt = req.user as { sub: string; email?: string }
     const tasks = await Promise.all(
-      body.siteIds.map(async (siteId) => {
+      targets.map(async (t) => {
         const task = await db.publishTask.upsert({
-          where: { postId_siteId: { postId: id, siteId } },
+          where: { postId_siteId: { postId: id, siteId: t.siteId } },
           create: {
-            postId: id, siteId, status: 'PENDING',
-            wpStatus:      body.wpStatus,
-            scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
+            postId: id, siteId: t.siteId, status: 'PENDING',
+            wpStatus:         t.wpStatus,
+            scheduledDate:    t.scheduledDate ? new Date(t.scheduledDate) : null,
+            categoryOverride: t.categoryOverride ?? null,
+            tagOverrides:     t.tagOverrides ?? [],
           },
           update: {
             status: 'PENDING', error: null,
-            wpStatus:      body.wpStatus,
-            scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
+            wpStatus:         t.wpStatus,
+            scheduledDate:    t.scheduledDate ? new Date(t.scheduledDate) : null,
+            categoryOverride: t.categoryOverride ?? null,
+            tagOverrides:     t.tagOverrides ?? [],
           },
         })
         await publishQueue.add('publish-post', { publishTaskId: task.id })
         return task.id
       })
     )
-    audit('post.publish', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id, metadata: { siteIds: body.siteIds, wpStatus: body.wpStatus, title: post.title } })
+    audit('post.publish', {
+      userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id,
+      metadata: { siteIds: targets.map(t => t.siteId), title: post.title },
+    })
     return { queued: tasks.length, taskIds: tasks }
   })
 

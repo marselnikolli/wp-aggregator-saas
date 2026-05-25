@@ -16,15 +16,19 @@ interface AiResult {
   category: string
 }
 
-const SYSTEM_PROMPT = `You are a news editor. Given an article title and body, respond with JSON only:
+function buildSystemPrompt(translateTo?: string) {
+  const outputLang = translateTo ? `in ${translateTo}` : 'in the same language as the article'
+  const titleNote  = translateTo ? `translated to ${translateTo}, SEO-friendly` : 'SEO-friendly rewritten (fix ALL-CAPS, shorten, keep key nouns)'
+  return `You are a news editor${translateTo ? ` and translator` : ''}. Given an article title and body, respond with JSON only:
 {
-  "title": "SEO-friendly rewritten title (fix ALL-CAPS, shorten, keep key nouns)",
-  "summary": "2-3 sentence summary in the same language as the article",
-  "excerpt": "1 sentence teaser in the same language (max 160 chars)",
-  "keywords": ["up to 5 relevant topic keywords in the article's language"],
-  "category": "single best-fit category from: Politics, Business, Sports, Technology, Entertainment, Health, Science, World, Crime, Culture, Opinion — match article language if the site is not English"
+  "title": "${titleNote}",
+  "summary": "2-3 sentence summary ${outputLang}",
+  "excerpt": "1 sentence teaser ${outputLang} (max 160 chars)",
+  "keywords": ["up to 5 relevant topic keywords"],
+  "category": "single best-fit category from: Politics, Business, Sports, Technology, Entertainment, Health, Science, World, Crime, Culture, Opinion"
 }
 No extra text, only valid JSON.`
+}
 
 function parseAiJson(raw: string): AiResult | null {
   try {
@@ -59,7 +63,7 @@ function computeQualityScore(post: {
   return Math.min(score, 100)
 }
 
-async function callAnthropic(key: string, title: string, content: string): Promise<AiResult | null> {
+async function callAnthropic(key: string, title: string, content: string, translateTo?: string): Promise<AiResult | null> {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -69,8 +73,8 @@ async function callAnthropic(key: string, title: string, content: string): Promi
     },
     body: JSON.stringify({
       model:      'claude-haiku-4-5-20251001',
-      max_tokens: 500,
-      system:     SYSTEM_PROMPT,
+      max_tokens: 600,
+      system:     buildSystemPrompt(translateTo),
       messages:   [{ role: 'user', content: `Title: ${title}\n\nContent: ${content.slice(0, 3000)}` }],
     }),
     signal: AbortSignal.timeout(30_000),
@@ -80,16 +84,16 @@ async function callAnthropic(key: string, title: string, content: string): Promi
   return parseAiJson(data.content[0]?.text ?? '')
 }
 
-async function callOpenAI(key: string, title: string, content: string): Promise<AiResult | null> {
+async function callOpenAI(key: string, title: string, content: string, translateTo?: string): Promise<AiResult | null> {
   const res = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model:           'gpt-4o-mini',
-      max_tokens:      500,
+      max_tokens:      600,
       response_format: { type: 'json_object' },
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'system', content: buildSystemPrompt(translateTo) },
         { role: 'user',   content: `Title: ${title}\n\nContent: ${content.slice(0, 3000)}` },
       ],
     }),
@@ -101,7 +105,14 @@ async function callOpenAI(key: string, title: string, content: string): Promise<
 }
 
 async function processPost(postId: string) {
-  const post = await db.aggregatedPost.findUniqueOrThrow({ where: { id: postId } })
+  const post = await db.aggregatedPost.findUniqueOrThrow({
+    where: { id: postId },
+    select: {
+      id: true, sourceId: true, title: true, content: true, excerpt: true, imageUrl: true,
+      aiSummary: true, aiTitle: true, language: true, categories: true,
+      approvalStatus: true, qualityScore: true, embedding: true, semanticDupOf: true,
+    },
+  })
 
   // Always compute quality score (local, no API needed)
   const qualityScore = computeQualityScore(post)
@@ -110,14 +121,20 @@ async function processPost(postId: string) {
   const needsAi = !post.aiSummary || !post.aiTitle
 
   if (needsAi && text.length >= 100) {
-    const anthropicKey = await getSettingValue('anthropic_key')
-    const openaiKey    = await getSettingValue('openai_key')
+    const [anthropicKey, openaiKey, translateToRow] = await Promise.all([
+      getSettingValue('anthropic_key'),
+      getSettingValue('openai_key'),
+      getSettingValue('translate_to'),
+    ])
+    // Only translate if the post language differs from the target language
+    const translateTo = translateToRow && post.language && !post.language.startsWith(translateToRow.slice(0, 2))
+      ? translateToRow : undefined
 
     let result: AiResult | null = null
     if (anthropicKey) {
-      result = await callAnthropic(anthropicKey, post.title, text)
+      result = await callAnthropic(anthropicKey, post.title, text, translateTo)
     } else if (openaiKey) {
-      result = await callOpenAI(openaiKey, post.title, text)
+      result = await callOpenAI(openaiKey, post.title, text, translateTo)
     }
 
     if (result) {
@@ -139,6 +156,30 @@ async function processPost(postId: string) {
             ? 'APPROVED' : undefined,
         },
       })
+      // Reload post with updated AI fields for embedding
+      const updated = await db.aggregatedPost.findUniqueOrThrow({
+        where: { id: postId },
+        select: { aiTitle: true, aiSummary: true, title: true, excerpt: true, embedding: true, semanticDupOf: true, sourceId: true },
+      })
+      if (!updated.embedding && !updated.semanticDupOf) {
+        const openaiKey2 = await getSettingValue('openai_key')
+        if (openaiKey2) {
+          const input2 = `${updated.aiTitle ?? updated.title}\n${updated.aiSummary ?? updated.excerpt ?? ''}`
+          const emb = await getEmbedding(openaiKey2, input2)
+          if (emb) {
+            const dupOf2 = await checkSemanticDuplicate(postId, emb, updated.sourceId)
+            await db.aggregatedPost.update({
+              where: { id: postId },
+              data: {
+                embedding:     JSON.stringify(emb),
+                semanticDupOf: dupOf2 ?? undefined,
+                ...(dupOf2 ? { approvalStatus: 'REJECTED' } : {}),
+              },
+            })
+            if (dupOf2) console.info(`[summarizer] Post ${postId} semantic dup of ${dupOf2} — rejected`)
+          }
+        }
+      }
       return
     }
   }
@@ -153,6 +194,82 @@ async function processPost(postId: string) {
   }
 
   await db.aggregatedPost.update({ where: { id: postId }, data: approvalUpdate })
+
+  // Semantic duplicate detection (runs after main update to avoid blocking it)
+  if (!post.embedding && !post.semanticDupOf) {
+    const openaiKey = await getSettingValue('openai_key')
+    if (openaiKey) {
+      const input = `${post.aiTitle ?? post.title}\n${post.aiSummary ?? post.excerpt ?? ''}`
+      const embedding = await getEmbedding(openaiKey, input)
+      if (embedding) {
+        const dupOf = await checkSemanticDuplicate(postId, embedding, post.sourceId)
+        await db.aggregatedPost.update({
+          where: { id: postId },
+          data: {
+            embedding:    JSON.stringify(embedding),
+            semanticDupOf: dupOf ?? undefined,
+            ...(dupOf ? { approvalStatus: 'REJECTED' } : {}),
+          },
+        })
+        if (dupOf) {
+          console.info(`[summarizer] Post ${postId} is semantic duplicate of ${dupOf} — auto-rejected`)
+        }
+      }
+    }
+  }
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0, normA = 0, normB = 0
+  for (let i = 0; i < a.length; i++) {
+    dot  += a[i] * b[i]
+    normA += a[i] * a[i]
+    normB += b[i] * b[i]
+  }
+  if (normA === 0 || normB === 0) return 0
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB))
+}
+
+async function getEmbedding(key: string, text: string): Promise<number[] | null> {
+  try {
+    const res = await fetch('https://api.openai.com/v1/embeddings', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'text-embedding-3-small', input: text.slice(0, 2000) }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (!res.ok) return null
+    const data = await res.json() as { data: Array<{ embedding: number[] }> }
+    return data.data[0]?.embedding ?? null
+  } catch { return null }
+}
+
+const SEMANTIC_DUP_THRESHOLD = 0.94
+
+async function checkSemanticDuplicate(postId: string, embedding: number[], sourceId: string): Promise<string | null> {
+  // Check against posts from the same source within the last 30 days
+  const cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000)
+  const candidates = await db.aggregatedPost.findMany({
+    where: {
+      id:        { not: postId },
+      sourceId,
+      embedding: { not: null },
+      createdAt: { gte: cutoff },
+    },
+    select: { id: true, embedding: true },
+    take: 500,
+  })
+
+  for (const c of candidates) {
+    if (!c.embedding) continue
+    try {
+      const vec = JSON.parse(c.embedding) as number[]
+      if (cosineSimilarity(embedding, vec) >= SEMANTIC_DUP_THRESHOLD) {
+        return c.id
+      }
+    } catch { /* skip malformed */ }
+  }
+  return null
 }
 
 export function startSummarizerWorker() {

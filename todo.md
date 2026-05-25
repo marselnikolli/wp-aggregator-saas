@@ -26,11 +26,11 @@
 - [x] OpenAI / Claude / Gemini summarization worker (actually call APIs — field exists but unused)
 - [x] AI title rewriting (make titles SEO-friendly, fix all-caps Albanian news titles)
 - [x] Auto language detection (langdetect or franc.js)
-- [ ] AI-powered translation (Albanian → other languages or vice versa)
+- [x] AI-powered translation (Albanian → other languages or vice versa)
 - [x] Auto keyword/tag extraction (feed into WP tags on publish)
 - [x] AI content categorisation (suggest WP category based on content)
 - [x] Quality scoring engine: readability score + length + image presence + source trust score
-- [ ] Semantic duplicate detection (embedding similarity, not just hash)
+- [x] Semantic duplicate detection (embedding similarity, not just hash)
 - [x] AI-generated excerpt if original is missing or too short
 
 ## Automation Pipeline
@@ -39,7 +39,7 @@
 - [x] Auto-reject rules: block posts matching keyword list, below quality threshold
 - [x] Scheduled publishing: publish at specific times (e.g. every morning at 08:00)
 - [x] Round-robin publishing (spread posts across sites evenly)
-- [ ] Publish to multiple sites simultaneously with per-site category/tag overrides
+- [x] Publish to multiple sites simultaneously with per-site category/tag overrides
 
 ## Publishing
 - [x] Featured image download + re-upload to target WP media library before publishing
@@ -66,7 +66,7 @@
 - [x] BullBoard job queue dashboard (visual inspection of queues)
 - [x] Per-source rate limiting (respect robots.txt + min delay between requests)
 - [x] Redis-based distributed lock (prevent duplicate fetches if worker restarts mid-job)
-- [ ] S3/R2 image storage (store downloaded images in object storage, not just URL reference)
+- [x] S3/R2 image storage (store downloaded images in object storage, not just URL reference)
 - [x] Caching layer (cache fetched feeds for N minutes, avoid hammering sources)
 - [x] DB query optimisation (add composite indexes for common filter combos)
 - [x] Prometheus metrics endpoint + Grafana dashboard
@@ -76,15 +76,15 @@
 - [x] Role-based access control (admin / editor / viewer)
 - [x] API key management (generate API keys for external integrations)
 - [x] Audit log (who approved/rejected/published what, and when)
-- [ ] 2FA (TOTP)
-- [ ] Session management (view + revoke active sessions)
+- [x] 2FA (TOTP)
+- [x] Session management (view + revoke active sessions)
 - [x] IP allowlist for API access
 
 ## Settings & Config
 - [x] Working AI provider settings (save/load keys, test connection)
 - [x] Global auto-fetch toggle + default interval
-- [ ] Default publishing pipeline config
-- [ ] Notification preferences (email on fetch error, daily digest)
+- [x] Default publishing pipeline config
+- [x] Notification preferences (email on fetch error, daily digest)
 - [x] Webhook outbound (POST to external URL on new post / publish event)
 - [x] Export all data (sources, posts, settings) to JSON
 - [x] Import/restore from export
