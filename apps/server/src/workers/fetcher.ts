@@ -7,7 +7,7 @@ import { redis } from '../queue.js'
 import { db } from '../db.js'
 import { decrypt } from '../lib/crypto.js'
 import { SourceType } from '@prisma/client'
-import { unwrapResponse, resolveDotPath } from '../lib/customApi.js'
+import { unwrapResponse, resolveDotPath, tryParseBody } from '../lib/customApi.js'
 import { summarizeQueue } from './summarizer.js'
 import { franc } from 'franc'
 
@@ -119,6 +119,86 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 const CF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 
+const SCRAPLING_PROXY = `http://127.0.0.1:${process.env.SCRAPLING_PROXY_PORT ?? '3002'}`
+
+async function fetchViaScrapling(url: string): Promise<string> {
+  try {
+    const res = await fetch(SCRAPLING_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+      signal: AbortSignal.timeout(60000),
+    })
+    if (!res.ok) return ''
+    const data = await res.json() as { success: boolean; html: string }
+    return data.success ? data.html : ''
+  } catch {
+    return ''
+  }
+}
+
+async function fetchWithFallback(url: string, headers: Record<string, string>, dispatcher?: any): Promise<{ text: string; ok: boolean }> {
+  try {
+    const res = await fetch(url, { headers, dispatcher, signal: AbortSignal.timeout(15000) } as any)
+    if (res.ok) return { text: await res.text(), ok: true }
+    // Cloudflare 403 — fall through to Scrapling
+    if (res.status === 403) {
+      const text = await fetchViaScrapling(url)
+      if (text) return { text, ok: true }
+    }
+    return { text: '', ok: false }
+  } catch {
+    const text = await fetchViaScrapling(url)
+    if (text) return { text, ok: true }
+    return { text: '', ok: false }
+  }
+}
+
+async function fetchArticleContent(
+  url: string,
+  dispatcher?: ProxyAgent,
+  ua?: string,
+): Promise<{ content: string; excerpt: string }> {
+  try {
+    const headers = { 'User-Agent': ua ?? CF_UA, 'Accept': 'text/html, */*' }
+    const fetched = await fetchWithFallback(url, headers, dispatcher)
+    if (!fetched.ok || !fetched.text) return { content: '', excerpt: '' }
+    const html = fetched.text
+    const $ = cheerio.load(html)
+
+    const selectors = [
+      '.a-full-content', '.all-content',
+      '[itemprop="articleBody"]',
+      '.article-content', '.post-content', '.entry-content',
+      'main',
+      '#content',
+      'article',
+    ]
+
+    let contentEl: cheerio.Cheerio<any> | null = null
+    for (const sel of selectors) {
+      const el = $(sel).first()
+      if (el.length) { contentEl = el; break }
+    }
+
+    if (!contentEl || !contentEl.length) {
+      const $body = $('body')
+      $body.find('script, style, noscript, nav, header, footer, aside, .sidebar, .menu, .comments').remove()
+      const text = $body.text().trim().slice(0, 10000)
+      return { content: '', excerpt: text.slice(0, 300) }
+    }
+
+    // Strip the featured image (first <img>) from content to avoid duplication with imageUrl field
+    contentEl.find('img').first().remove()
+
+    const html_content = contentEl.html() ?? ''
+    const text = contentEl.text().trim()
+    return { content: cleanContent(html_content), excerpt: text.slice(0, 300) }
+  } catch {
+    return { content: '', excerpt: '' }
+  }
+}
+
 async function fetchCustomApi(source: {
   endpoint: string
   fieldMap: unknown
@@ -139,41 +219,62 @@ async function fetchCustomApi(source: {
   }
 
   const results: ReturnType<typeof mapRssItem>[] = []
+  const baseUrl = (() => { try { return new URL(source.endpoint.replace('{id}', '1')).origin } catch { return '' } })()
+  const maxPerCat = 1
 
   for (const { id, name } of categoryMappings) {
     let page = 1
+    let catCount = 0
     while (true) {
       let url = source.endpoint.replace('{id}', id)
       if (source.paginationParam) url += `&${source.paginationParam}=${page}`
 
-      let items: unknown[]
-      try {
-        const res = await fetch(url, { headers, dispatcher, signal: AbortSignal.timeout(15000) } as any)
-        if (!res.ok) break
-        const data = await res.json()
-        items = unwrapResponse(data)
-      } catch { break }
+      let items: unknown[] = []
+      let isHtml = false
+      const fetched = await fetchWithFallback(url, headers, dispatcher)
+      if (!fetched.ok || !fetched.text) break
+      const parsed = tryParseBody(fetched.text)
+      items = parsed.items
+      isHtml = parsed.isHtml
 
       if (!items.length) break
 
       if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
 
       for (const item of items) {
+        if (catCount >= maxPerCat) break
+        const resolved = item as Record<string, unknown>
+        if (isHtml && typeof resolved.url === 'string' && resolved.url.startsWith('/') && baseUrl) {
+          resolved.url = baseUrl + resolved.url
+        }
+
         const get = (field: string, fallback: string) =>
-          resolveDotPath(fieldMap[field] ?? fallback, item)
+          resolveDotPath(fieldMap[field] ?? fallback, resolved)
+
+        let content = String(get('content', 'content') ?? '')
+        let excerpt = String(get('excerpt', 'excerpt') ?? '')
+
+        if (isHtml && !content && typeof resolved.url === 'string' && resolved.url) {
+          if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
+          const scraped = await fetchArticleContent(resolved.url, dispatcher, ua)
+          content = scraped.content
+          if (!excerpt) excerpt = scraped.excerpt
+        }
 
         results.push({
           remoteId:    String(get('remoteId', 'id') ?? Math.random()),
           title:       String(get('title', 'title') ?? ''),
-          content:     cleanContent(String(get('content', 'content') ?? '')),
-          excerpt:     String(get('excerpt', 'excerpt') ?? '').slice(0, 300),
+          content:     cleanContent(content),
+          excerpt:     excerpt.slice(0, 300),
           imageUrl:    (get('imageUrl', 'image') as string | null) ?? null,
           originalUrl: (get('originalUrl', 'url') as string | null) ?? null,
           author:      (get('author', 'author') as string | null) ?? null,
           categories:  [name],
         })
+        catCount++
       }
 
+      if (catCount >= maxPerCat) break
       if (!source.paginationParam) break
       page++
     }

@@ -4,7 +4,7 @@ import { fetch } from 'undici'
 import { db } from '../db.js'
 import { fetchQueue, fetchQueueEvents } from '../queue.js'
 import { encrypt } from '../lib/crypto.js'
-import { unwrapResponse, CAT_NAME_KEYS, FIELD_GUESS_MAP } from '../lib/customApi.js'
+import { unwrapResponse, CAT_NAME_KEYS, FIELD_GUESS_MAP, tryParseBody } from '../lib/customApi.js'
 import { audit } from '../lib/audit.js'
 
 const INTERVAL_MS: Record<string, number> = {
@@ -329,9 +329,10 @@ export async function sourcesRoutes(app: FastifyInstance) {
 
     const categories: Array<{ id: string; name: string; count: number }> = []
     let consecutiveMisses = 0
+    let isHtml = false
 
-    for (let batchStart = 1; batchStart <= 100 && consecutiveMisses < 10; batchStart += 10) {
-      const batchSize = Math.min(10, 101 - batchStart)
+    for (let batchStart = 1; batchStart <= 9999 && consecutiveMisses < 10; batchStart += 10) {
+      const batchSize = Math.min(10, 10000 - batchStart)
       const batchIds = Array.from({ length: batchSize }, (_, i) => batchStart + i)
 
       const results = await Promise.allSettled(
@@ -339,15 +340,20 @@ export async function sourcesRoutes(app: FastifyInstance) {
           const url = endpoint.replace('{id}', String(id))
           const res = await fetch(url, { signal: AbortSignal.timeout(5000) })
           if (!res.ok) throw new Error('not ok')
-          const data = await res.json()
-          const items = unwrapResponse(data)
-          if (!items.length) throw new Error('empty')
-          const first = items[0] as Record<string, unknown>
+          const text = await res.text()
+          const parsed = tryParseBody(text)
+          if (!parsed.items.length) throw new Error('empty')
+          const first = parsed.items[0] as Record<string, unknown>
+          isHtml = parsed.isHtml
           let name: string | undefined
-          for (const key of CAT_NAME_KEYS) {
-            if (typeof first[key] === 'string' && first[key]) { name = first[key] as string; break }
+          if (parsed.isHtml) {
+            name = (first.category as string) || `Category ${id}`
+          } else {
+            for (const key of CAT_NAME_KEYS) {
+              if (typeof first[key] === 'string' && first[key]) { name = first[key] as string; break }
+            }
           }
-          return { id: String(id), name: name ?? `Category ${id}`, count: items.length }
+          return { id: String(id), name: name ?? `Category ${id}`, count: parsed.items.length }
         })
       )
 
@@ -369,13 +375,27 @@ export async function sourcesRoutes(app: FastifyInstance) {
         const firstUrl = endpoint.replace('{id}', categories[0].id)
         const res = await fetch(firstUrl, { signal: AbortSignal.timeout(5000) })
         if (res.ok) {
-          const data = await res.json()
-          const items = unwrapResponse(data)
-          if (items.length) {
-            sampleKeys = Object.keys(items[0] as object)
-            for (const [field, candidates] of Object.entries(FIELD_GUESS_MAP)) {
-              for (const c of candidates) {
-                if (sampleKeys.includes(c)) { suggestedFieldMap[field] = c; break }
+          const text = await res.text()
+          const parsed = tryParseBody(text)
+          if (parsed.items.length) {
+            if (parsed.isHtml) {
+              sampleKeys = Object.keys(parsed.items[0] as object)
+              suggestedFieldMap = {
+                title: 'title',
+                imageUrl: 'image',
+                originalUrl: 'url',
+                remoteId: 'id',
+              }
+            } else {
+              const data = JSON.parse(text)
+              const items = unwrapResponse(data)
+              if (items.length) {
+                sampleKeys = Object.keys(items[0] as object)
+                for (const [field, candidates] of Object.entries(FIELD_GUESS_MAP)) {
+                  for (const c of candidates) {
+                    if (sampleKeys.includes(c)) { suggestedFieldMap[field] = c; break }
+                  }
+                }
               }
             }
           }

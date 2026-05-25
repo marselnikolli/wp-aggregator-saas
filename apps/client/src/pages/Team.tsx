@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Plus, Trash2, Copy, Check, Users, Key, MonitorSmartphone } from 'lucide-react'
+import { Loader2, Plus, Trash2, Copy, Check, Users, Key } from 'lucide-react'
 import { toast } from 'sonner'
 import { usersApi, apiKeysApi, authApi } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -97,7 +97,7 @@ export function Team() {
 
   const { data: users    = [], isLoading: loadingUsers } = useQuery({ queryKey: ['users'],    queryFn: usersApi.list })
   const { data: keys     = [], isLoading: loadingKeys  } = useQuery({ queryKey: ['api-keys'], queryFn: apiKeysApi.list })
-  const { data: sessions = [], isLoading: loadingSessions } = useQuery({ queryKey: ['sessions'], queryFn: authApi.sessions })
+  useQuery({ queryKey: ['sessions'], queryFn: authApi.sessions })
 
   const deleteUser = useMutation({
     mutationFn: (id: string) => usersApi.remove(id),
@@ -125,12 +125,6 @@ export function Team() {
     mutationFn: (id: string) => apiKeysApi.remove(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['api-keys'] }); toast.success('Key revoked') },
     onError: () => toast.error('Failed to revoke key'),
-  })
-
-  const revokeSession = useMutation({
-    mutationFn: (jti: string) => authApi.revoke(jti),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sessions'] }); toast.success('Session revoked') },
-    onError: () => toast.error('Failed to revoke session'),
   })
 
   return (

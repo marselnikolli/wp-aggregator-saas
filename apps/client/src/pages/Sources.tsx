@@ -235,24 +235,34 @@ function SourceHealthDialog({ source, onClose }: { source: any; onClose: () => v
 const SOURCE_TYPE_LABELS: Record<string, string> = {
   RSS:        'RSS Feed',
   WP_API:     'WP REST API',
-  CUSTOM_API: 'Custom API',
+  CUSTOM_API: 'Mediadesk CMS',
+}
+
+function buildMediadeskEndpoint(domain: string): string {
+  let d = domain.trim().replace(/^https?:\/\//, '').replace(/\/.*$/, '')
+  if (!d.startsWith('www.')) d = 'www.' + d
+  return `https://${d}/meshume.php?j=1&id={id}`
 }
 
 function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
-    name: '', endpoint: '', type: 'RSS' as 'RSS' | 'WP_API' | 'CUSTOM_API',
+    name: '', endpoint: '', domain: '', type: 'RSS' as 'RSS' | 'WP_API' | 'CUSTOM_API',
   })
   const [customApi, setCustomApi] = useState<CustomApiValue>(EMPTY_CUSTOM)
 
   function reset() {
-    setForm({ name: '', endpoint: '', type: 'RSS' })
+    setForm({ name: '', endpoint: '', domain: '', type: 'RSS' })
     setCustomApi(EMPTY_CUSTOM)
   }
 
   const create = useMutation({
     mutationFn: () => {
-      const body: Record<string, any> = { ...form }
+      const body: Record<string, any> = {
+        name: form.name,
+        endpoint: form.type === 'CUSTOM_API' ? buildMediadeskEndpoint(form.domain) : form.endpoint,
+        type: form.type,
+      }
       if (form.type === 'CUSTOM_API') {
         body.fieldMap          = customApi.fieldMap
         body.categoryMappings  = customApi.categories
@@ -280,6 +290,7 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
   }
 
   const isCustom = form.type === 'CUSTOM_API'
+  const constructedEndpoint = isCustom && form.domain.trim() ? buildMediadeskEndpoint(form.domain) : form.endpoint
 
   return (
     <Dialog open={open} onOpenChange={() => { reset(); onClose() }}>
@@ -292,16 +303,25 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
               onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           </div>
           <div className="grid gap-1.5">
-            <Label>{isCustom ? 'Endpoint template' : 'Endpoint URL'}</Label>
-            <div className="flex gap-2">
-              <Input
-                placeholder={isCustom ? 'https://example.com/api.php?j=60&id={id}' : 'https://example.com/feed'}
-                value={form.endpoint}
-                onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
-              {!isCustom && <DetectButton url={form.endpoint} onDetect={handleDetect} />}
-            </div>
-            {isCustom && (
-              <p className="text-xs text-muted-foreground">Use <code className="bg-secondary px-1 rounded">{'{id}'}</code> as placeholder for the category ID</p>
+            {isCustom ? (
+              <>
+                <Label>Domain</Label>
+                <Input placeholder="oranews.tv" value={form.domain}
+                  onChange={e => setForm(p => ({ ...p, domain: e.target.value, name: p.name || e.target.value.replace(/^www\./, '') }))} />
+                <p className="text-xs text-muted-foreground">
+                  Endpoint will be auto-built as:<br />
+                  <code className="bg-secondary px-1 rounded break-all">{constructedEndpoint}</code>
+                </p>
+              </>
+            ) : (
+              <>
+                <Label>Endpoint URL</Label>
+                <div className="flex gap-2">
+                  <Input placeholder="https://example.com/feed" value={form.endpoint}
+                    onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
+                  <DetectButton url={form.endpoint} onDetect={handleDetect} />
+                </div>
+              </>
             )}
           </div>
           <div className="grid gap-1.5">
@@ -316,7 +336,7 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
             </div>
           </div>
           {isCustom && (
-            <CustomApiSection endpoint={form.endpoint} value={customApi} onChange={setCustomApi} />
+            <CustomApiSection endpoint={constructedEndpoint} value={customApi} onChange={setCustomApi} />
           )}
         </div>
         <DialogFooter>
@@ -330,11 +350,19 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
   )
 }
 
+function domainFromEndpoint(endpoint: string): string {
+  try {
+    const host = new URL(endpoint).hostname.replace(/^www\./, '')
+    return host
+  } catch { return endpoint }
+}
+
 function EditSourceDialog({ source, onClose }: { source: any; onClose: () => void }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
     name:        source.name ?? '',
     endpoint:    source.endpoint ?? '',
+    domain:      domainFromEndpoint(source.endpoint ?? ''),
     type:        source.type as 'RSS' | 'WP_API' | 'CUSTOM_API',
     interval:    source.interval ?? '',
     username:    source.username ?? '',
@@ -366,7 +394,7 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
     mutationFn: () => {
       const body: Record<string, any> = {
         name:        form.name,
-        endpoint:    form.endpoint,
+        endpoint:    form.type === 'CUSTOM_API' ? buildMediadeskEndpoint(form.domain) : form.endpoint,
         type:        form.type,
         interval:    form.interval || null,
         username:    form.username || null,
@@ -403,6 +431,7 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
   }
 
   const isCustom = form.type === 'CUSTOM_API'
+  const constructedEndpoint = isCustom && form.domain.trim() ? buildMediadeskEndpoint(form.domain) : form.endpoint
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -414,13 +443,23 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
             <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           </div>
           <div className="grid gap-1.5">
-            <Label>{isCustom ? 'Endpoint template' : 'Endpoint URL'}</Label>
-            <div className="flex gap-2">
-              <Input value={form.endpoint} onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
-              {!isCustom && <DetectButton url={form.endpoint} onDetect={handleDetect} />}
-            </div>
-            {isCustom && (
-              <p className="text-xs text-muted-foreground">Use <code className="bg-secondary px-1 rounded">{'{id}'}</code> as placeholder for the category ID</p>
+            {isCustom ? (
+              <>
+                <Label>Domain</Label>
+                <Input placeholder="oranews.tv" value={form.domain}
+                  onChange={e => setForm(p => ({ ...p, domain: e.target.value }))} />
+                <p className="text-xs text-muted-foreground">
+                  Endpoint: <code className="bg-secondary px-1 rounded break-all">{constructedEndpoint}</code>
+                </p>
+              </>
+            ) : (
+              <>
+                <Label>Endpoint URL</Label>
+                <div className="flex gap-2">
+                  <Input value={form.endpoint} onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
+                  <DetectButton url={form.endpoint} onDetect={handleDetect} />
+                </div>
+              </>
             )}
           </div>
           <div className="grid gap-1.5">
