@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2, Upload, FileUp, ChevronLeft, ChevronRight, CheckCircle, XCircle, Pencil, Search } from 'lucide-react'
+import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2, Upload, FileUp, ChevronLeft, ChevronRight, CheckCircle, XCircle, Pencil, Search, Code2, Globe, Activity, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
-import { sourcesApi } from '@/lib/api'
+import { sourcesApi, sitesApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -21,6 +21,123 @@ const INTERVALS = [
   { value: '24h', label: 'Daily'         },
 ]
 
+const FIELD_MAP_LABELS = [
+  { key: 'title',       label: 'Title',       placeholder: 'title' },
+  { key: 'content',     label: 'Content',     placeholder: 'content or body' },
+  { key: 'excerpt',     label: 'Excerpt',     placeholder: 'excerpt or summary' },
+  { key: 'imageUrl',    label: 'Image URL',   placeholder: 'image or thumbnail.url' },
+  { key: 'originalUrl', label: 'Article URL', placeholder: 'url or link' },
+  { key: 'remoteId',    label: 'Remote ID',   placeholder: 'id' },
+  { key: 'author',      label: 'Author',      placeholder: 'author or author.name' },
+]
+
+type CategoryMapping = { id: string; name: string; count?: number }
+type FieldMapData    = Record<string, string>
+interface CustomApiValue {
+  categories:     CategoryMapping[]
+  fieldMap:       FieldMapData
+  paginationParam: string
+}
+
+const EMPTY_CUSTOM: CustomApiValue = { categories: [], fieldMap: {}, paginationParam: '' }
+
+function CustomApiSection({
+  endpoint,
+  value,
+  onChange,
+}: {
+  endpoint: string
+  value:    CustomApiValue
+  onChange: (v: CustomApiValue) => void
+}) {
+  const scan = useMutation({
+    mutationFn: () => sourcesApi.scanCustom(endpoint),
+    onSuccess: (data: any) => {
+      onChange({
+        categories:      data.categories ?? [],
+        fieldMap:        data.suggestedFieldMap ?? {},
+        paginationParam: value.paginationParam,
+      })
+      toast.success(`Found ${(data.categories ?? []).length} categories`)
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Scan failed'),
+  })
+
+  function setCategory(index: number, name: string) {
+    const next = [...value.categories]
+    next[index] = { ...next[index], name }
+    onChange({ ...value, categories: next })
+  }
+
+  function setField(key: string, path: string) {
+    onChange({ ...value, fieldMap: { ...value.fieldMap, [key]: path } })
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Button type="button" variant="outline" size="sm"
+          onClick={() => scan.mutate()} disabled={!endpoint.trim() || scan.isPending}>
+          {scan.isPending ? <Loader2 className="animate-spin" /> : <Search />}
+          {scan.isPending ? 'Scanning…' : 'Scan categories'}
+        </Button>
+        {value.categories.length > 0 && (
+          <span className="text-xs text-muted-foreground">{value.categories.length} categories found</span>
+        )}
+      </div>
+
+      {value.categories.length > 0 && (
+        <div className="grid gap-1.5">
+          <Label>Categories <span className="text-muted-foreground text-xs font-normal">(edit names as needed)</span></Label>
+          <div className="rounded-md border border-border overflow-hidden max-h-48 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-secondary/60 sticky top-0">
+                <tr>
+                  <th className="text-left px-3 py-1.5 text-xs text-muted-foreground w-12">ID</th>
+                  <th className="text-left px-3 py-1.5 text-xs text-muted-foreground">Name</th>
+                  <th className="text-right px-3 py-1.5 text-xs text-muted-foreground w-14">Posts</th>
+                </tr>
+              </thead>
+              <tbody>
+                {value.categories.map((cat, i) => (
+                  <tr key={cat.id} className="border-t border-border">
+                    <td className="px-3 py-1 text-muted-foreground font-mono text-xs">{cat.id}</td>
+                    <td className="px-2 py-0.5">
+                      <Input value={cat.name} onChange={e => setCategory(i, e.target.value)}
+                        className="h-7 text-sm border-0 bg-transparent focus-visible:ring-1 px-1" />
+                    </td>
+                    <td className="px-3 py-1 text-right text-muted-foreground text-xs">{cat.count ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-1.5">
+        <Label>Field mapping <span className="text-muted-foreground text-xs font-normal">(dot-path into each item)</span></Label>
+        <div className="grid gap-1.5">
+          {FIELD_MAP_LABELS.map(({ key, label, placeholder }) => (
+            <div key={key} className="grid grid-cols-[110px_1fr] items-center gap-2">
+              <span className="text-sm text-muted-foreground text-right">{label}</span>
+              <Input value={value.fieldMap[key] ?? ''} onChange={e => setField(key, e.target.value)}
+                placeholder={placeholder} className="h-7 text-sm" />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid gap-1.5">
+        <Label>Pagination param <span className="text-muted-foreground text-xs font-normal">(leave blank for single-page)</span></Label>
+        <Input value={value.paginationParam} placeholder="page or p"
+          onChange={e => onChange({ ...value, paginationParam: e.target.value })}
+          className="max-w-xs h-8 text-sm" />
+      </div>
+    </div>
+  )
+}
+
 function DetectButton({ url, onDetect }: { url: string; onDetect: (result: any) => void }) {
   const detect = useMutation({
     mutationFn: () => sourcesApi.detect(url),
@@ -36,17 +153,119 @@ function DetectButton({ url, onDetect }: { url: string; onDetect: (result: any) 
   )
 }
 
+function SourceHealthDialog({ source, onClose }: { source: any; onClose: () => void }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['source-health', source.id],
+    queryFn:  () => sourcesApi.health(source.id),
+  })
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Health — {source.name}</DialogTitle></DialogHeader>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8"><Loader2 className="animate-spin text-muted-foreground" /></div>
+        ) : data ? (
+          <div className="space-y-4 py-2">
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="rounded-md bg-secondary/60 p-3 text-center">
+                <p className="text-2xl font-bold">
+                  {data.successRate !== null ? `${data.successRate}%` : '—'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Success rate</p>
+              </div>
+              <div className="rounded-md bg-secondary/60 p-3 text-center">
+                <p className="text-2xl font-bold">
+                  {data.avgDuration !== null ? `${(data.avgDuration / 1000).toFixed(1)}s` : '—'}
+                </p>
+                <p className="text-xs text-muted-foreground mt-0.5">Avg duration</p>
+              </div>
+              <div className="rounded-md bg-secondary/60 p-3 text-center">
+                <p className="text-2xl font-bold">{data.totalJobs}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Total runs</p>
+              </div>
+            </div>
+
+            {/* Sparkline of recent jobs */}
+            {data.recentJobs?.length > 0 && (
+              <div className="grid gap-1.5">
+                <p className="text-xs text-muted-foreground font-medium">Recent runs (newest right)</p>
+                <div className="flex gap-1 items-end h-10">
+                  {[...(data.recentJobs as any[])].reverse().map((job: any) => (
+                    <div key={job.id} title={`${job.status} · ${job.newPosts} new · ${job.error ?? ''}`}
+                      className={`flex-1 rounded-sm min-h-[4px] ${job.status === 'OK' ? 'bg-emerald-500' : job.status === 'ERROR' ? 'bg-red-500' : 'bg-muted'}`}
+                      style={{ height: job.duration ? `${Math.min(100, (job.duration / 10000) * 100)}%` : '20%' }} />
+                  ))}
+                </div>
+                <div className="flex justify-between text-[10px] text-muted-foreground">
+                  <span>oldest</span><span className="text-emerald-500">■ ok</span><span className="text-red-400">■ error</span><span>newest</span>
+                </div>
+              </div>
+            )}
+
+            {/* Recent errors */}
+            {data.recentJobs?.some((j: any) => j.status === 'ERROR') && (
+              <div className="grid gap-1.5">
+                <p className="text-xs text-muted-foreground font-medium">Recent errors</p>
+                <div className="max-h-36 overflow-y-auto space-y-1">
+                  {(data.recentJobs as any[]).filter(j => j.status === 'ERROR').slice(0, 5).map((job: any) => (
+                    <div key={job.id} className="rounded-md bg-red-500/10 border border-red-500/20 px-3 py-2">
+                      <p className="text-xs text-red-400 font-mono truncate">{job.error}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {new Date(job.createdAt).toLocaleString()}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {data.totalJobs === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">No fetch history yet.</p>
+            )}
+          </div>
+        ) : null}
+        <DialogFooter><Button onClick={onClose}>Close</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  RSS:        'RSS Feed',
+  WP_API:     'WP REST API',
+  CUSTOM_API: 'Custom API',
+}
+
 function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ name: '', endpoint: '', type: 'RSS' as 'RSS' | 'WP_API' })
+  const [form, setForm] = useState({
+    name: '', endpoint: '', type: 'RSS' as 'RSS' | 'WP_API' | 'CUSTOM_API',
+  })
+  const [customApi, setCustomApi] = useState<CustomApiValue>(EMPTY_CUSTOM)
+
+  function reset() {
+    setForm({ name: '', endpoint: '', type: 'RSS' })
+    setCustomApi(EMPTY_CUSTOM)
+  }
 
   const create = useMutation({
-    mutationFn: () => sourcesApi.create(form),
-    onSuccess: () => {
+    mutationFn: () => {
+      const body: Record<string, any> = { ...form }
+      if (form.type === 'CUSTOM_API') {
+        body.fieldMap          = customApi.fieldMap
+        body.categoryMappings  = customApi.categories
+        body.paginationParam   = customApi.paginationParam || null
+      }
+      return sourcesApi.create(body)
+    },
+    onSuccess: (d: any) => {
       qc.invalidateQueries({ queryKey: ['sources'] })
-      toast.success('Source added')
+      if (d.warning) toast.warning(d.warning)
+      else toast.success('Source added')
+      reset()
       onClose()
-      setForm({ name: '', endpoint: '', type: 'RSS' })
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to add source'),
   })
@@ -55,42 +274,53 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
     setForm(p => ({
       ...p,
       endpoint: result.endpoint,
-      type: result.type as 'RSS' | 'WP_API',
+      type: result.type as 'RSS' | 'WP_API' | 'CUSTOM_API',
       name: p.name || result.name,
     }))
   }
 
+  const isCustom = form.type === 'CUSTOM_API'
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent>
+    <Dialog open={open} onOpenChange={() => { reset(); onClose() }}>
+      <DialogContent className={isCustom ? 'max-w-xl max-h-[88vh] overflow-y-auto' : ''}>
         <DialogHeader><DialogTitle>Add Feed Source</DialogTitle></DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
             <Label>Name</Label>
-            <Input placeholder="My News Source" value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+            <Input placeholder="My News Source" value={form.name}
+              onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           </div>
           <div className="grid gap-1.5">
-            <Label>Endpoint URL</Label>
+            <Label>{isCustom ? 'Endpoint template' : 'Endpoint URL'}</Label>
             <div className="flex gap-2">
-              <Input placeholder="https://example.com/feed" value={form.endpoint}
+              <Input
+                placeholder={isCustom ? 'https://example.com/api.php?j=60&id={id}' : 'https://example.com/feed'}
+                value={form.endpoint}
                 onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
-              <DetectButton url={form.endpoint} onDetect={handleDetect} />
+              {!isCustom && <DetectButton url={form.endpoint} onDetect={handleDetect} />}
             </div>
+            {isCustom && (
+              <p className="text-xs text-muted-foreground">Use <code className="bg-secondary px-1 rounded">{'{id}'}</code> as placeholder for the category ID</p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label>Type</Label>
             <div className="flex gap-2">
-              {(['RSS', 'WP_API'] as const).map(t => (
+              {(['RSS', 'WP_API', 'CUSTOM_API'] as const).map(t => (
                 <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
                   className={`flex-1 rounded-md border py-2 text-sm transition-colors ${form.type === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}>
-                  {t === 'RSS' ? 'RSS Feed' : 'WP REST API'}
+                  {SOURCE_TYPE_LABELS[t]}
                 </button>
               ))}
             </div>
           </div>
+          {isCustom && (
+            <CustomApiSection endpoint={form.endpoint} value={customApi} onChange={setCustomApi} />
+          )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" onClick={() => { reset(); onClose() }}>Cancel</Button>
           <Button onClick={() => create.mutate()} disabled={create.isPending}>
             {create.isPending && <Loader2 className="animate-spin" />} Add Source
           </Button>
@@ -103,24 +333,56 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
 function EditSourceDialog({ source, onClose }: { source: any; onClose: () => void }) {
   const qc = useQueryClient()
   const [form, setForm] = useState({
-    name:     source.name ?? '',
-    endpoint: source.endpoint ?? '',
-    type:     source.type as 'RSS' | 'WP_API',
-    interval: source.interval ?? '',
-    username: source.username ?? '',
-    password: '',
+    name:        source.name ?? '',
+    endpoint:    source.endpoint ?? '',
+    type:        source.type as 'RSS' | 'WP_API' | 'CUSTOM_API',
+    interval:    source.interval ?? '',
+    username:    source.username ?? '',
+    password:    '',
+    autoApprove:  source.autoApprove ?? false,
+    tags:         (source.tags ?? []) as string[],
+    minDelaySec:  source.minDelaySec ?? 1,
+    userAgent:    source.userAgent ?? '',
+    proxyUrl:     source.proxyUrl ?? '',
+  })
+  const [tagInput, setTagInput] = useState('')
+  const [showCatMap, setShowCatMap] = useState(false)
+  // categoryMap: { siteId: { remoteCategory: localCategory } }
+  const [categoryMap, setCategoryMap] = useState<Record<string, Record<string, string>>>(
+    (source.categoryMap as Record<string, Record<string, string>>) ?? {}
+  )
+  const { data: sites = [] } = useQuery<any[]>({ queryKey: ['sites'], queryFn: sitesApi.list })
+  const { data: remoteCategories = [] } = useQuery<string[]>({
+    queryKey: ['source-categories', source.id],
+    queryFn: () => sourcesApi.categories(source.id),
+  })
+  const [customApi, setCustomApi] = useState<CustomApiValue>({
+    categories:      (source.categoryMappings as CategoryMapping[]) ?? [],
+    fieldMap:        (source.fieldMap as FieldMapData) ?? {},
+    paginationParam: source.paginationParam ?? '',
   })
 
   const update = useMutation({
     mutationFn: () => {
       const body: Record<string, any> = {
-        name:     form.name,
-        endpoint: form.endpoint,
-        type:     form.type,
-        interval: form.interval || null,
-        username: form.username || null,
+        name:        form.name,
+        endpoint:    form.endpoint,
+        type:        form.type,
+        interval:    form.interval || null,
+        username:    form.username || null,
+        autoApprove:  form.autoApprove,
+        tags:         form.tags,
+        minDelaySec:  form.minDelaySec,
+        userAgent:    form.userAgent || null,
+        proxyUrl:     form.proxyUrl || null,
+        categoryMap:  Object.keys(categoryMap).length ? categoryMap : null,
       }
       if (form.password) body.password = form.password
+      if (form.type === 'CUSTOM_API') {
+        body.fieldMap         = customApi.fieldMap
+        body.categoryMappings = customApi.categories
+        body.paginationParam  = customApi.paginationParam || null
+      }
       return sourcesApi.update(source.id, body)
     },
     onSuccess: () => {
@@ -135,14 +397,16 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
     setForm(p => ({
       ...p,
       endpoint: result.endpoint,
-      type: result.type as 'RSS' | 'WP_API',
+      type: result.type as 'RSS' | 'WP_API' | 'CUSTOM_API',
       name: p.name || result.name,
     }))
   }
 
+  const isCustom = form.type === 'CUSTOM_API'
+
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent>
+      <DialogContent className={isCustom ? 'max-w-xl max-h-[88vh] overflow-y-auto' : ''}>
         <DialogHeader><DialogTitle>Edit Source</DialogTitle></DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
@@ -150,19 +414,22 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
             <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
           </div>
           <div className="grid gap-1.5">
-            <Label>Endpoint URL</Label>
+            <Label>{isCustom ? 'Endpoint template' : 'Endpoint URL'}</Label>
             <div className="flex gap-2">
               <Input value={form.endpoint} onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
-              <DetectButton url={form.endpoint} onDetect={handleDetect} />
+              {!isCustom && <DetectButton url={form.endpoint} onDetect={handleDetect} />}
             </div>
+            {isCustom && (
+              <p className="text-xs text-muted-foreground">Use <code className="bg-secondary px-1 rounded">{'{id}'}</code> as placeholder for the category ID</p>
+            )}
           </div>
           <div className="grid gap-1.5">
             <Label>Type</Label>
             <div className="flex gap-2">
-              {(['RSS', 'WP_API'] as const).map(t => (
+              {(['RSS', 'WP_API', 'CUSTOM_API'] as const).map(t => (
                 <button key={t} onClick={() => setForm(p => ({ ...p, type: t }))}
                   className={`flex-1 rounded-md border py-2 text-sm transition-colors ${form.type === t ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}>
-                  {t === 'RSS' ? 'RSS Feed' : 'WP REST API'}
+                  {SOURCE_TYPE_LABELS[t]}
                 </button>
               ))}
             </div>
@@ -174,19 +441,126 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
               {INTERVALS.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
             </select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="grid gap-1.5">
-              <Label>Username <span className="text-muted-foreground">(optional)</span></Label>
-              <Input value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))}
-                placeholder="wp-user" />
+          {!isCustom && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-1.5">
+                <Label>Username <span className="text-muted-foreground">(optional)</span></Label>
+                <Input value={form.username} onChange={e => setForm(p => ({ ...p, username: e.target.value }))}
+                  placeholder="wp-user" />
+              </div>
+              <div className="grid gap-1.5">
+                <Label>Password <span className="text-muted-foreground">(optional)</span></Label>
+                <Input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                  placeholder={source.username ? 'Leave blank to keep' : 'App password'} />
+              </div>
             </div>
-            <div className="grid gap-1.5">
-              <Label>Password <span className="text-muted-foreground">(optional)</span></Label>
-              <Input type="password" value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
-                placeholder={source.username ? 'Leave blank to keep' : 'App password'} />
+          )}
+          {isCustom && (
+            <>
+              <CustomApiSection endpoint={form.endpoint} value={customApi} onChange={setCustomApi} />
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Rate Limit — Delay between requests (seconds)</Label>
+                <Input
+                  type="number" min={0} max={60} className="w-24 text-sm"
+                  value={form.minDelaySec}
+                  onChange={e => setForm(p => ({ ...p, minDelaySec: Number(e.target.value) }))}
+                />
+              </div>
+              <div className="grid gap-2 rounded-md border border-border/60 p-3">
+                <p className="text-xs font-medium text-muted-foreground">Cloudflare Bypass</p>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Custom User-Agent <span className="text-muted-foreground">(leave blank for default Chrome UA)</span></Label>
+                  <Input className="text-xs font-mono" placeholder="Mozilla/5.0 …"
+                    value={form.userAgent}
+                    onChange={e => setForm(p => ({ ...p, userAgent: e.target.value }))} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Proxy URL <span className="text-muted-foreground">(optional, e.g. http://host:port)</span></Label>
+                  <Input className="text-xs font-mono" placeholder="http://proxy:8080"
+                    value={form.proxyUrl}
+                    onChange={e => setForm(p => ({ ...p, proxyUrl: e.target.value }))} />
+                </div>
+              </div>
+            </>
+          )}
+          <label className="flex items-center justify-between rounded-md border border-border px-3 py-2.5 cursor-pointer hover:bg-secondary/50">
+            <div>
+              <p className="text-sm font-medium">Auto-approve fetched posts</p>
+              <p className="text-xs text-muted-foreground">Skip the review queue — posts go straight to approved</p>
             </div>
+            <Switch checked={form.autoApprove}
+              onCheckedChange={v => setForm(p => ({ ...p, autoApprove: v }))} />
+          </label>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Source Tags</Label>
+            <div className="flex gap-1.5">
+              <Input
+                placeholder="Add tag…"
+                value={tagInput}
+                className="text-xs h-8"
+                onChange={e => setTagInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key !== 'Enter') return
+                  const t = tagInput.trim().toLowerCase()
+                  if (t && !form.tags.includes(t)) setForm(p => ({ ...p, tags: [...p.tags, t] }))
+                  setTagInput('')
+                }}
+              />
+            </div>
+            {form.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {form.tags.map(t => (
+                  <span key={t} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs">
+                    {t}
+                    <button onClick={() => setForm(p => ({ ...p, tags: p.tags.filter(x => x !== t) }))}
+                      className="text-muted-foreground hover:text-foreground">×</button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
+        {/* Category mapping — shown when there are known categories and sites */}
+        {remoteCategories.length > 0 && sites.length > 0 && (
+          <div className="rounded-md border border-border/60">
+            <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground"
+              onClick={() => setShowCatMap(v => !v)}>
+              Category mapping (remote → local WP)
+              {showCatMap ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            {showCatMap && (
+              <div className="border-t border-border/60 p-3 space-y-3">
+                <p className="text-xs text-muted-foreground">Map remote category names to local WP category names per target site. Leave blank to use the original name.</p>
+                {(sites as any[]).map(site => (
+                  <div key={site.id} className="space-y-1.5">
+                    <p className="text-xs font-medium">{site.name}</p>
+                    <div className="grid gap-1">
+                      {remoteCategories.map(cat => (
+                        <div key={cat} className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground w-36 truncate shrink-0">{cat}</span>
+                          <span className="text-xs text-muted-foreground">→</span>
+                          <Input
+                            className="h-6 text-xs"
+                            placeholder={cat}
+                            value={(categoryMap[site.id] ?? {})[cat] ?? ''}
+                            onChange={e => {
+                              const val = e.target.value
+                              setCategoryMap(m => {
+                                const siteMap = { ...(m[site.id] ?? {}) }
+                                if (val) siteMap[cat] = val; else delete siteMap[cat]
+                                return { ...m, [site.id]: siteMap }
+                              })
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
           <Button onClick={() => update.mutate()} disabled={update.isPending}>
@@ -297,9 +671,11 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
 export function Sources() {
   const [open, setOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
-  const [editTarget, setEditTarget] = useState<any>(null)
+  const [editTarget, setEditTarget]     = useState<any>(null)
+  const [healthTarget, setHealthTarget] = useState<any>(null)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
+  const [tagFilter, setTagFilter] = useState('')
   const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
   const qc = useQueryClient()
 
@@ -356,8 +732,8 @@ export function Sources() {
   }, [qc])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['sources', page, perPage],
-    queryFn: () => sourcesApi.list({ page, per_page: perPage }),
+    queryKey: ['sources', page, perPage, tagFilter],
+    queryFn: () => sourcesApi.list({ page, per_page: perPage, ...(tagFilter ? { tag: tagFilter } : {}) }),
     placeholderData: (prev: any) => prev,
   })
 
@@ -386,6 +762,13 @@ export function Sources() {
   const sources    = data?.items ?? []
   const totalPages = data?.pages ?? 1
 
+  const dragId = useRef<string | null>(null)
+  const reorder = useMutation({
+    mutationFn: ({ id, beforeId, afterId }: { id: string; beforeId: string | null; afterId: string | null }) =>
+      sourcesApi.reorder(id, beforeId, afterId),
+    onSuccess: invalidate,
+  })
+
   return (
     <div className="space-y-6 p-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
@@ -405,9 +788,20 @@ export function Sources() {
         </div>
       </div>
 
+      {tagFilter && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted-foreground">Filtered by tag:</span>
+          <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
+            {tagFilter}
+            <button onClick={() => setTagFilter('')} className="text-muted-foreground hover:text-foreground">×</button>
+          </span>
+        </div>
+      )}
+
       <AddSourceDialog open={open} onClose={() => setOpen(false)} />
       <ImportDialog open={importOpen} onClose={() => setImportOpen(false)} />
-      {editTarget && <EditSourceDialog source={editTarget} onClose={() => setEditTarget(null)} />}
+      {editTarget   && <EditSourceDialog source={editTarget} onClose={() => setEditTarget(null)} />}
+      {healthTarget && <SourceHealthDialog source={healthTarget} onClose={() => setHealthTarget(null)} />}
 
       {isLoading ? (
         <div className="space-y-3">{[...Array(4)].map((_, i) => <Skeleton key={i} className="h-20" />)}</div>
@@ -422,12 +816,29 @@ export function Sources() {
       ) : (
         <>
           <div className="grid gap-3">
-            {sources.map((src: any) => (
-              <Card key={src.id}>
+            {sources.map((src: any, idx: number) => (
+              <Card key={src.id}
+                draggable
+                onDragStart={() => { dragId.current = src.id }}
+                onDragOver={e => e.preventDefault()}
+                onDrop={() => {
+                  const from = dragId.current
+                  if (!from || from === src.id) return
+                  const beforeId = idx > 0 ? sources[idx - 1]?.id ?? null : null
+                  const afterId = src.id
+                  reorder.mutate({ id: from, beforeId, afterId })
+                  dragId.current = null
+                }}
+                className="cursor-default">
                 <CardContent className="flex items-center justify-between p-4">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
+                    <GripVertical className="h-4 w-4 text-muted-foreground/40 shrink-0 cursor-grab active:cursor-grabbing" />
                     <div className="flex h-9 w-9 items-center justify-center rounded-md bg-secondary shrink-0">
-                      <Rss className="h-4 w-4 text-muted-foreground" />
+                      {src.type === 'CUSTOM_API'
+                        ? <Code2 className="h-4 w-4 text-muted-foreground" />
+                        : src.type === 'WP_API'
+                        ? <Globe className="h-4 w-4 text-muted-foreground" />
+                        : <Rss className="h-4 w-4 text-muted-foreground" />}
                     </div>
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
@@ -436,6 +847,15 @@ export function Sources() {
                         {src.interval && (
                           <Badge variant="secondary" className="text-xs">{src.interval}</Badge>
                         )}
+                        {src.autoApprove && (
+                          <Badge variant="secondary" className="text-xs text-emerald-400 border-emerald-500/30 bg-emerald-500/10">Auto-approve</Badge>
+                        )}
+                        {src.tags?.map((t: string) => (
+                          <Badge key={t} variant="outline" className="text-xs cursor-pointer hover:bg-secondary"
+                            onClick={() => setTagFilter(t)}>
+                            {t}
+                          </Badge>
+                        ))}
                       </div>
                       <p className="text-xs text-muted-foreground truncate max-w-sm">{src.endpoint}</p>
                       <p className="text-xs text-muted-foreground">
@@ -460,6 +880,10 @@ export function Sources() {
                       checked={src.enabled}
                       onCheckedChange={(enabled) => toggle.mutate({ id: src.id, enabled })}
                     />
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                      onClick={() => setHealthTarget(src)} title="Health">
+                      <Activity className="h-3.5 w-3.5" />
+                    </Button>
                     <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground"
                       onClick={() => setEditTarget(src)}>
                       <Pencil className="h-3.5 w-3.5" />

@@ -2,12 +2,14 @@ import { Worker, Job } from 'bullmq'
 import Parser from 'rss-parser'
 import * as cheerio from 'cheerio'
 import { createHash } from 'crypto'
-import { fetch } from 'undici'
+import { fetch, ProxyAgent } from 'undici'
 import { redis } from '../queue.js'
 import { db } from '../db.js'
 import { decrypt } from '../lib/crypto.js'
 import { SourceType } from '@prisma/client'
 import { unwrapResponse, resolveDotPath } from '../lib/customApi.js'
+import { summarizeQueue } from './summarizer.js'
+import { franc } from 'franc'
 
 const rss = new Parser({ timeout: 10000 })
 
@@ -113,14 +115,28 @@ async function fetchWpApi(endpoint: string, auth?: { username: string; password:
   }))
 }
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const CF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+
 async function fetchCustomApi(source: {
   endpoint: string
   fieldMap: unknown
   categoryMappings: unknown
   paginationParam: string | null
+  minDelaySec: number
+  userAgent: string | null
+  proxyUrl: string | null
 }) {
   const fieldMap = (source.fieldMap as Record<string, string> | null) ?? {}
   const categoryMappings = (source.categoryMappings as Array<{ id: string; name: string }> | null) ?? []
+
+  const dispatcher = source.proxyUrl ? new ProxyAgent(source.proxyUrl) : undefined
+  const ua = source.userAgent ?? CF_UA
+  const headers: Record<string, string> = {
+    'User-Agent': ua,
+    'Accept': 'application/json, text/plain, */*',
+  }
 
   const results: ReturnType<typeof mapRssItem>[] = []
 
@@ -132,13 +148,15 @@ async function fetchCustomApi(source: {
 
       let items: unknown[]
       try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+        const res = await fetch(url, { headers, dispatcher, signal: AbortSignal.timeout(15000) } as any)
         if (!res.ok) break
         const data = await res.json()
         items = unwrapResponse(data)
       } catch { break }
 
       if (!items.length) break
+
+      if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
 
       for (const item of items) {
         const get = (field: string, fallback: string) =>
@@ -164,6 +182,53 @@ async function fetchCustomApi(source: {
   return results
 }
 
+async function fireWebhook(post: { id: string; title: string; originalUrl: string | null; createdAt: Date }) {
+  const row = await db.setting.findUnique({ where: { key: 'webhook_url' } })
+  if (!row?.value) return
+  try {
+    await fetch(row.value, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'new_post', post }),
+      signal: AbortSignal.timeout(5000),
+    })
+  } catch { /* non-fatal */ }
+}
+
+async function getBlocklist(): Promise<string[]> {
+  const row = await db.setting.findUnique({ where: { key: 'blocklist' } })
+  return row ? JSON.parse(row.value) : []
+}
+
+function isBlocked(title: string, content: string | null, blocklist: string[]): boolean {
+  if (!blocklist.length) return false
+  const haystack = (title + ' ' + (content ?? '')).toLowerCase()
+  return blocklist.some(word => haystack.includes(word))
+}
+
+const INTERVAL_CACHE_TTL: Record<string, number> = {
+  '15m': 14 * 60,
+  '1h':  55 * 60,
+  '6h':  5 * 60 * 60,
+  '24h': 23 * 60 * 60,
+}
+
+async function getCachedItems(sourceId: string): Promise<ReturnType<typeof mapRssItem>[] | null> {
+  try {
+    const raw = await redis.get(`feed-cache:${sourceId}`)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+async function setCachedItems(sourceId: string, interval: string | null, items: ReturnType<typeof mapRssItem>[]) {
+  if (!interval) return
+  const ttl = INTERVAL_CACHE_TTL[interval]
+  if (!ttl) return
+  try {
+    await redis.set(`feed-cache:${sourceId}`, JSON.stringify(items), 'EX', ttl)
+  } catch { /* non-fatal */ }
+}
+
 async function processSource(sourceId: string): Promise<{ fetched: number; newPosts: number }> {
   const source = await db.source.findUniqueOrThrow({ where: { id: sourceId } })
 
@@ -173,12 +238,17 @@ async function processSource(sourceId: string): Promise<{ fetched: number; newPo
     catch { /* bad decrypt — run without auth */ }
   }
 
-  const items = source.type === SourceType.RSS
-    ? await fetchRss(source.endpoint, auth)
-    : source.type === SourceType.WP_API
-      ? await fetchWpApi(source.endpoint, auth)
-      : await fetchCustomApi(source)
+  const cached = await getCachedItems(sourceId)
+  const items = cached ?? (
+    source.type === SourceType.RSS
+      ? await fetchRss(source.endpoint, auth)
+      : source.type === SourceType.WP_API
+        ? await fetchWpApi(source.endpoint, auth)
+        : await fetchCustomApi(source)
+  )
+  if (!cached) await setCachedItems(sourceId, source.interval, items)
 
+  const blocklist = await getBlocklist()
   let newPosts = 0
   for (const item of items) {
     const hash = createHash('sha256')
@@ -186,13 +256,25 @@ async function processSource(sourceId: string): Promise<{ fetched: number; newPo
       .digest('hex')
     const existing = await db.aggregatedPost.findUnique({ where: { hash } })
     if (existing) continue
-    await db.aggregatedPost.create({
+
+    const blocked = isBlocked(item.title, item.content, blocklist)
+    const created = await db.aggregatedPost.create({
       data: {
         sourceId: source.id, remoteId: item.remoteId, title: item.title,
         content: item.content, excerpt: item.excerpt, imageUrl: item.imageUrl,
         originalUrl: item.originalUrl, author: item.author, categories: item.categories, hash,
+        approvalStatus: blocked ? 'REJECTED' : source.autoApprove ? 'APPROVED' : 'PENDING',
       },
     })
+    // Language detection (sync, best-effort)
+    const rawText = (item.title + ' ' + (item.content ?? item.excerpt ?? '')).replace(/<[^>]+>/g, '').slice(0, 1000)
+    const lang = franc(rawText, { minLength: 20 })
+    if (lang !== 'und') {
+      await db.aggregatedPost.update({ where: { id: created.id }, data: { language: lang } })
+    }
+
+    await summarizeQueue.add('summarize', { postId: created.id }, { attempts: 2, backoff: { type: 'fixed', delay: 5000 } })
+    fireWebhook({ id: created.id, title: created.title, originalUrl: created.originalUrl, createdAt: created.createdAt }).catch(() => {})
     newPosts++
   }
 
@@ -204,16 +286,36 @@ async function processSource(sourceId: string): Promise<{ fetched: number; newPo
   return { fetched: items.length, newPosts }
 }
 
+const LOCK_TTL_MS = 5 * 60 * 1000 // 5 minutes max per fetch job
+
+async function acquireLock(sourceId: string): Promise<boolean> {
+  const result = await (redis as any).set(`fetch-lock:${sourceId}`, '1', 'NX', 'PX', LOCK_TTL_MS)
+  return result === 'OK'
+}
+
+async function releaseLock(sourceId: string) {
+  await redis.del(`fetch-lock:${sourceId}`)
+}
+
 export function startFetchWorker() {
   const worker = new Worker<FetchJobData>(
     'fetch',
     async (job: Job<FetchJobData>) => {
+      const { sourceId } = job.data
+
+      // Distributed lock — skip if another worker is already fetching this source
+      const locked = await acquireLock(sourceId)
+      if (!locked) {
+        console.log(`[fetch-worker] source ${sourceId} already being fetched, skipping`)
+        return { fetched: 0, newPosts: 0, skipped: true }
+      }
+
       const jobRecord = await db.fetchJob.create({
-        data: { sourceId: job.data.sourceId, status: 'PENDING' },
+        data: { sourceId, status: 'PENDING' },
       })
       const start = Date.now()
       try {
-        const { fetched, newPosts } = await processSource(job.data.sourceId)
+        const { fetched, newPosts } = await processSource(sourceId)
         await db.fetchJob.update({
           where: { id: jobRecord.id },
           data: { status: 'OK', fetched, newPosts, duration: Date.now() - start },
@@ -226,10 +328,12 @@ export function startFetchWorker() {
           data: { status: 'ERROR', error, duration: Date.now() - start },
         })
         await db.source.update({
-          where: { id: job.data.sourceId },
+          where: { id: sourceId },
           data: { fetchStatus: 'ERROR', errorCount: { increment: 1 }, lastError: error.slice(0, 200) },
         })
         throw err
+      } finally {
+        await releaseLock(sourceId)
       }
     },
     { connection: redis, concurrency: 3 },

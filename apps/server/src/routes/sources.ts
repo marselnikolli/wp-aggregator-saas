@@ -5,6 +5,7 @@ import { db } from '../db.js'
 import { fetchQueue, fetchQueueEvents } from '../queue.js'
 import { encrypt } from '../lib/crypto.js'
 import { unwrapResponse, CAT_NAME_KEYS, FIELD_GUESS_MAP } from '../lib/customApi.js'
+import { audit } from '../lib/audit.js'
 
 const INTERVAL_MS: Record<string, number> = {
   '15m': 900_000,
@@ -45,9 +46,15 @@ const sourceUpdateBody = z.object({
   interval:          z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
   username:          z.string().optional(),
   password:          z.string().optional(),
+  autoApprove:       z.boolean().optional(),
+  tags:              z.array(z.string()).optional(),
+  minDelaySec:       z.number().int().min(0).max(60).optional(),
   fieldMap:          z.record(z.string()).nullable().optional(),
   categoryMappings:  z.array(z.object({ id: z.string(), name: z.string() })).nullable().optional(),
   paginationParam:   z.string().nullable().optional(),
+  userAgent:         z.string().nullable().optional(),
+  proxyUrl:          z.string().nullable().optional(),
+  categoryMap:       z.record(z.record(z.string())).nullable().optional(),
 })
 
 export async function sourcesRoutes(app: FastifyInstance) {
@@ -55,14 +62,18 @@ export async function sourcesRoutes(app: FastifyInstance) {
     const query = z.object({
       page:     z.coerce.number().min(1).default(1),
       per_page: z.coerce.number().min(1).max(100).default(20),
+      tag:      z.string().optional(),
     }).parse(req.query)
 
+    const where = query.tag ? { tags: { has: query.tag } } : undefined
+
     const [total, items] = await Promise.all([
-      db.source.count(),
+      db.source.count({ where }),
       db.source.findMany({
+        where,
         skip: (query.page - 1) * query.per_page,
         take: query.per_page,
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
         include: { _count: { select: { posts: true } } },
       }),
     ])
@@ -73,9 +84,23 @@ export async function sourcesRoutes(app: FastifyInstance) {
 
   app.post('/sources', { preHandler: [app.authenticate] }, async (req, reply) => {
     const body = sourceBody.parse(req.body)
+
+    // Deduplication: warn if same hostname already exists
+    let duplicateWarning: string | undefined
+    try {
+      const hostname = new URL(body.endpoint).hostname
+      const existing = await db.source.findFirst({
+        where: { endpoint: { contains: hostname } },
+        select: { name: true },
+      })
+      if (existing) duplicateWarning = `Domain already used by "${existing.name}"`
+    } catch { /* invalid URL — skip check */ }
+
     const source = await db.source.create({ data: body })
+    const jwt = req.user as { sub: string; email?: string }
+    audit('source.create', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'source', resourceId: source.id, metadata: { name: source.name, type: source.type } })
     const { password: _pw, ...safe } = source
-    return reply.code(201).send(safe)
+    return reply.code(201).send({ ...safe, ...(duplicateWarning ? { warning: duplicateWarning } : {}) })
   })
 
   app.patch('/sources/:id', { preHandler: [app.authenticate] }, async (req) => {
@@ -111,8 +136,11 @@ export async function sourcesRoutes(app: FastifyInstance) {
 
   app.delete('/sources/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
+    const jwt = req.user as { sub: string; email?: string }
+    const source = await db.source.findUnique({ where: { id }, select: { name: true } })
     await fetchQueue.removeJobScheduler(`fetch-source-${id}`).catch(() => { /* ok if not found */ })
     await db.source.delete({ where: { id } })
+    audit('source.delete', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'source', resourceId: id, metadata: { name: source?.name } })
     return reply.code(204).send()
   })
 
@@ -178,6 +206,26 @@ export async function sourcesRoutes(app: FastifyInstance) {
       where: { sourceId: id },
     })
     return [...new Set(posts.flatMap(p => p.categories))].filter(Boolean).sort()
+  })
+
+  // Reorder: set sortOrder for a source by providing before/after neighbour IDs
+  app.patch('/sources/:id/reorder', { preHandler: [app.authenticate] }, async (req) => {
+    const { id } = req.params as { id: string }
+    const { beforeId, afterId } = z.object({
+      beforeId: z.string().nullable().optional(),
+      afterId:  z.string().nullable().optional(),
+    }).parse(req.body)
+
+    const [before, after] = await Promise.all([
+      beforeId ? db.source.findUnique({ where: { id: beforeId }, select: { sortOrder: true } }) : null,
+      afterId  ? db.source.findUnique({ where: { id: afterId  }, select: { sortOrder: true } }) : null,
+    ])
+
+    const lo = before?.sortOrder ?? 0
+    const hi = after?.sortOrder ?? lo + 2
+    const newOrder = (lo + hi) / 2
+
+    return db.source.update({ where: { id }, data: { sortOrder: newOrder }, select: { id: true, sortOrder: true } })
   })
 
   app.post('/sources/:id/fetch', { preHandler: [app.authenticate] }, async (req) => {
@@ -336,5 +384,31 @@ export async function sourcesRoutes(app: FastifyInstance) {
     }
 
     return { categories, suggestedFieldMap, sampleKeys }
+  })
+
+  app.get('/sources/:id/health', { preHandler: [app.authenticate] }, async (req) => {
+    const { id } = req.params as { id: string }
+
+    const jobs = await db.fetchJob.findMany({
+      where:   { sourceId: id },
+      orderBy: { createdAt: 'desc' },
+      take:    50,
+      select:  { id: true, status: true, fetched: true, newPosts: true, duration: true, error: true, createdAt: true },
+    })
+
+    const total   = jobs.length
+    const success = jobs.filter(j => j.status === 'OK').length
+    const durations = jobs.map(j => j.duration).filter((d): d is number => d !== null)
+    const avgDuration = durations.length
+      ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
+      : null
+
+    return {
+      totalJobs:    total,
+      successJobs:  success,
+      successRate:  total ? Math.round((success / total) * 100) : null,
+      avgDuration,
+      recentJobs:   jobs.slice(0, 20),
+    }
   })
 }

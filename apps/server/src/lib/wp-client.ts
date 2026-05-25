@@ -1,13 +1,15 @@
 import { fetch } from 'undici'
 
 interface WPPostPayload {
-  title:        string
-  content:      string
-  excerpt?:     string
-  status:       'draft' | 'publish' | 'future'
-  date?:        string
+  title:           string
+  content:         string
+  excerpt?:        string
+  status:          'draft' | 'publish' | 'future'
+  date?:           string
   featured_media?: number
-  categories?:  number[]
+  categories?:     number[]
+  tags?:           number[]
+  author?:         number
 }
 
 interface WPMediaPayload {
@@ -19,6 +21,8 @@ interface WPMediaPayload {
 export class WPClient {
   private base: string
   private auth: string
+  private categoryCache = new Map<string, number>()
+  private tagCache      = new Map<string, number>()
 
   constructor(siteUrl: string, user: string, password: string) {
     this.base = siteUrl.replace(/\/$/, '') + '/wp-json/wp/v2'
@@ -53,6 +57,74 @@ export class WPClient {
     })
     if (!res.ok) throw new Error(`WP media upload error ${res.status}`)
     return res.json() as Promise<{ id: number; source_url: string }>
+  }
+
+  async getOrCreateCategory(name: string): Promise<number> {
+    const key = name.toLowerCase()
+    if (this.categoryCache.has(key)) return this.categoryCache.get(key)!
+
+    // Search existing categories
+    const searchRes = await fetch(
+      `${this.base}/categories?search=${encodeURIComponent(name)}&per_page=20`,
+      { headers: { Authorization: this.auth } },
+    )
+    if (searchRes.ok) {
+      const cats = await searchRes.json() as Array<{ id: number; name: string }>
+      const match = cats.find(c => c.name.toLowerCase() === key)
+      if (match) {
+        this.categoryCache.set(key, match.id)
+        return match.id
+      }
+    }
+
+    // Create if not found
+    const createRes = await fetch(`${this.base}/categories`, {
+      method: 'POST',
+      headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!createRes.ok) throw new Error(`WP category create error ${createRes.status}`)
+    const created = await createRes.json() as { id: number }
+    this.categoryCache.set(key, created.id)
+    return created.id
+  }
+
+  async getOrCreateTag(name: string): Promise<number> {
+    const key = name.toLowerCase()
+    if (this.tagCache.has(key)) return this.tagCache.get(key)!
+
+    const searchRes = await fetch(
+      `${this.base}/tags?search=${encodeURIComponent(name)}&per_page=20`,
+      { headers: { Authorization: this.auth } },
+    )
+    if (searchRes.ok) {
+      const tags = await searchRes.json() as Array<{ id: number; name: string }>
+      const match = tags.find(t => t.name.toLowerCase() === key)
+      if (match) { this.tagCache.set(key, match.id); return match.id }
+    }
+
+    const createRes = await fetch(`${this.base}/tags`, {
+      method: 'POST',
+      headers: { Authorization: this.auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    })
+    if (!createRes.ok) throw new Error(`WP tag create error ${createRes.status}`)
+    const created = await createRes.json() as { id: number }
+    this.tagCache.set(key, created.id)
+    return created.id
+  }
+
+  async updatePost(wpPostId: number, payload: Partial<WPPostPayload>): Promise<{ id: number; link: string }> {
+    const res = await fetch(`${this.base}/posts/${wpPostId}`, {
+      method: 'POST',
+      headers: { 'Authorization': this.auth, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`WP API update error ${res.status}: ${err}`)
+    }
+    return res.json() as Promise<{ id: number; link: string }>
   }
 
   async testConnection(): Promise<boolean> {

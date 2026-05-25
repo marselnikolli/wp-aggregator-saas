@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle, XCircle, Upload, Trash2, FileText,
   Loader2, ExternalLink, ChevronLeft, ChevronRight,
-  Pencil, Save, X, CheckSquare, Square, Keyboard,
+  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles,
 } from 'lucide-react'
 import { formatDistanceToNow, format, sub } from 'date-fns'
 import { toast } from 'sonner'
@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 
@@ -40,13 +41,26 @@ function dateFromPreset(days: number) {
   return sub(new Date(), { days }).toISOString()
 }
 
+const WP_STATUS_OPTIONS = [
+  { value: 'publish', label: 'Publish now',   desc: 'Go live immediately' },
+  { value: 'draft',   label: 'Save as draft', desc: 'Hidden until manually published' },
+  { value: 'future',  label: 'Schedule',      desc: 'Publish at a specific time' },
+] as const
+
 function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
-  const [selected, setSelected] = useState<string[]>([])
+  const [selected, setSelected]     = useState<string[]>([])
+  const [wpStatus, setWpStatus]     = useState<'publish' | 'draft' | 'future'>('publish')
+  const [scheduleAt, setScheduleAt] = useState('')
   const { data: sites } = useQuery({ queryKey: ['sites'], queryFn: sitesApi.list })
   const qc = useQueryClient()
 
   const publish = useMutation({
-    mutationFn: () => postsApi.publish(post.id, selected),
+    mutationFn: () => {
+      const isoDate = wpStatus === 'future' && scheduleAt
+        ? new Date(scheduleAt).toISOString()
+        : undefined
+      return postsApi.publish(post.id, selected, wpStatus, isoDate)
+    },
     onSuccess: (d) => {
       toast.success(`Queued for ${d.queued} site(s)`)
       qc.invalidateQueries({ queryKey: ['posts'] })
@@ -55,30 +69,58 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Publish failed'),
   })
 
+  const canSubmit = selected.length > 0 && (wpStatus !== 'future' || !!scheduleAt)
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
         <DialogHeader><DialogTitle>Publish to Sites</DialogTitle></DialogHeader>
-        <div className="space-y-2 py-2">
+        <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">Destination for: <strong>{post?.title}</strong></p>
-          {sites?.map((site: any) => (
-            <label key={site.id} className="flex items-center gap-3 rounded-md border border-border p-3 cursor-pointer hover:bg-secondary/50">
-              <Switch
-                checked={selected.includes(site.id)}
-                onCheckedChange={(c) => setSelected(p => c ? [...p, site.id] : p.filter(i => i !== site.id))}
-              />
-              <div>
-                <p className="text-sm font-medium">{site.name}</p>
-                <p className="text-xs text-muted-foreground">{site.url}</p>
-              </div>
-            </label>
-          ))}
+
+          {/* Site selection */}
+          <div className="space-y-2">
+            {sites?.map((site: any) => (
+              <label key={site.id} className="flex items-center gap-3 rounded-md border border-border p-3 cursor-pointer hover:bg-secondary/50">
+                <Switch
+                  checked={selected.includes(site.id)}
+                  onCheckedChange={(c) => setSelected(p => c ? [...p, site.id] : p.filter(i => i !== site.id))}
+                />
+                <div>
+                  <p className="text-sm font-medium">{site.name}</p>
+                  <p className="text-xs text-muted-foreground">{site.url}</p>
+                </div>
+              </label>
+            ))}
+          </div>
+
+          {/* Status */}
+          <div className="grid gap-1.5">
+            <Label>Status</Label>
+            <div className="flex gap-2">
+              {WP_STATUS_OPTIONS.map(opt => (
+                <button key={opt.value} type="button" onClick={() => setWpStatus(opt.value)}
+                  className={`flex-1 rounded-md border py-2 px-1 text-xs transition-colors text-center ${wpStatus === opt.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-border/80'}`}>
+                  <span className="block font-medium text-sm">{opt.label}</span>
+                  <span className="block text-[11px] opacity-70">{opt.desc}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {wpStatus === 'future' && (
+            <div className="grid gap-1.5">
+              <Label>Schedule date &amp; time</Label>
+              <input type="datetime-local" value={scheduleAt} onChange={e => setScheduleAt(e.target.value)}
+                className="h-9 rounded-md border border-border bg-secondary px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => publish.mutate()} disabled={!selected.length || publish.isPending}>
+          <Button onClick={() => publish.mutate()} disabled={!canSubmit || publish.isPending}>
             {publish.isPending && <Loader2 className="animate-spin" />}
-            Publish to {selected.length} site{selected.length !== 1 ? 's' : ''}
+            {wpStatus === 'draft' ? 'Save draft' : wpStatus === 'future' ? 'Schedule' : `Publish to ${selected.length} site${selected.length !== 1 ? 's' : ''}`}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -369,7 +411,10 @@ export function Posts() {
                           onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium leading-snug line-clamp-2">{post.title}</p>
+                        <p className="text-sm font-medium leading-snug line-clamp-2">
+                          {post.aiTitle ?? post.title}
+                          {post.aiTitle && <Sparkles className="inline h-3 w-3 ml-1 text-violet-400 shrink-0" />}
+                        </p>
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
                           {post.source?.name}
                           {post.categories?.length > 0 && <> · {post.categories.slice(0, 2).join(', ')}</>}
@@ -428,7 +473,13 @@ export function Posts() {
             ) : (
               <>
                 <div className="flex-1 min-w-0">
-                  <h2 className="text-sm font-semibold leading-snug">{selected.title}</h2>
+                  <h2 className="text-sm font-semibold leading-snug">
+                    {selected.aiTitle ?? selected.title}
+                    {selected.aiTitle && <Sparkles className="inline h-3 w-3 ml-1.5 text-violet-400" />}
+                  </h2>
+                  {selected.aiTitle && selected.aiTitle !== selected.title && (
+                    <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5 opacity-60">Original: {selected.title}</p>
+                  )}
                   <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-1.5 text-xs text-muted-foreground">
                     <span>{selected.source?.name}</span>
                     {selected.categories?.length > 0 && (<><span>·</span><span>{selected.categories.join(', ')}</span></>)}
@@ -440,6 +491,14 @@ export function Posts() {
                       {selected.approvalStatus}
                     </Badge>
                     {selected.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
+                    {selected.language && selected.language !== 'en' && (
+                      <Badge variant="outline" className="text-xs font-mono">{selected.language}</Badge>
+                    )}
+                    {selected.qualityScore != null && (
+                      <Badge variant="outline" className={`text-xs ${selected.qualityScore >= 60 ? 'text-emerald-400 border-emerald-500/30' : selected.qualityScore >= 30 ? 'text-yellow-400 border-yellow-500/30' : 'text-muted-foreground'}`}>
+                        Q:{selected.qualityScore}
+                      </Badge>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5 mt-3">
@@ -471,6 +530,11 @@ export function Posts() {
                       <Upload />Publish
                     </Button>
                   )}
+                  {selected.publishStatus === 'PUBLISHED' && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
+                      <Upload />Republish
+                    </Button>
+                  )}
                   <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive ml-auto"
                     onClick={() => remove.mutate(selected.id)} disabled={remove.isPending}>
                     {remove.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -484,6 +548,15 @@ export function Posts() {
             {selected.imageUrl && (
               <img src={selected.imageUrl} alt="" className="w-full rounded-md object-cover max-h-52"
                 onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            )}
+            {selected.aiSummary && !editMode && (
+              <div className="rounded-md bg-violet-500/10 border border-violet-500/20 px-3 py-2.5 text-xs text-foreground/80 leading-relaxed">
+                <div className="flex items-center gap-1.5 mb-1.5 text-violet-400">
+                  <Sparkles className="h-3 w-3" />
+                  <span className="font-medium text-xs">AI Summary</span>
+                </div>
+                {selected.aiSummary}
+              </div>
             )}
             {editMode ? (
               <textarea value={draft.content} onChange={e => setDraft(p => ({ ...p, content: e.target.value }))}

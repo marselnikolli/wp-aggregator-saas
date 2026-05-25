@@ -15,19 +15,34 @@ model User {
   role      String   @default("admin")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  apiKeys   ApiKey[]
+}
+
+model ApiKey {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  keyHash   String    @unique
+  lastUsed  DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([keyHash])
 }
 
 model Site {
-  id           String        @id @default(cuid())
-  name         String
-  url          String
-  apiUser      String
-  apiPassword  String
-  enabled      Boolean       @default(true)
-  lastPublished DateTime?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  publishTasks PublishTask[]
+  id              String        @id @default(cuid())
+  name            String
+  url             String
+  apiUser         String
+  apiPassword     String
+  enabled         Boolean       @default(true)
+  defaultCategory String?
+  defaultAuthorId Int?
+  lastPublished   DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  publishTasks    PublishTask[]
 
   @@index([enabled])
 }
@@ -49,6 +64,13 @@ model Source {
   fieldMap          Json?
   categoryMappings  Json?
   paginationParam   String?
+  autoApprove       Boolean          @default(false)
+  tags              String[]         @default([])
+  minDelaySec       Int              @default(1)
+  userAgent         String?
+  proxyUrl          String?
+  categoryMap       Json?
+  sortOrder         Float            @default(0)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
   posts       AggregatedPost[]
@@ -73,6 +95,7 @@ model AggregatedPost {
   categories     String[]       @default([])
   language       String         @default("en")
   aiSummary      String?        @db.Text
+  aiTitle        String?
   qualityScore   Int?
   approvalStatus ApprovalStatus @default(PENDING)
   publishStatus  PublishStatus  @default(DRAFT)
@@ -87,20 +110,24 @@ model AggregatedPost {
   @@index([publishStatus])
   @@index([createdAt])
   @@index([hash])
+  @@index([approvalStatus, createdAt])
+  @@index([sourceId, approvalStatus])
 }
 
 model PublishTask {
-  id       String         @id @default(cuid())
-  postId   String
-  post     AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  siteId   String
-  site     Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  status   TaskStatus     @default(PENDING)
-  wpPostId Int?
-  error    String?
-  attempts Int            @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id            String         @id @default(cuid())
+  postId        String
+  post          AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  siteId        String
+  site          Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  status        TaskStatus     @default(PENDING)
+  wpStatus      String         @default("publish")
+  scheduledDate DateTime?
+  wpPostId      Int?
+  error         String?
+  attempts      Int            @default(0)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
   @@unique([postId, siteId])
   @@index([status])
@@ -119,6 +146,7 @@ model FetchJob {
 
   @@index([sourceId])
   @@index([createdAt])
+  @@index([sourceId, createdAt])
 }
 
 model Setting {
@@ -157,4 +185,19 @@ enum TaskStatus {
   PROCESSING
   DONE
   FAILED
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?
+  userEmail    String?
+  action       String
+  resourceType String
+  resourceId   String?
+  metadata     Json?
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([resourceType, resourceId])
 }

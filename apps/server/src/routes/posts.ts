@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { db } from '../db.js'
 import { publishQueue } from '../queue.js'
+import { audit } from '../lib/audit.js'
 
 export async function postsRoutes(app: FastifyInstance) {
   app.get('/posts', { preHandler: [app.authenticate] }, async (req) => {
@@ -54,34 +55,58 @@ export async function postsRoutes(app: FastifyInstance) {
 
   app.patch('/posts/:id/approve', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
-    return db.aggregatedPost.update({ where: { id }, data: { approvalStatus: 'APPROVED' } })
+    const jwt = req.user as { sub: string; email?: string }
+    const post = await db.aggregatedPost.update({ where: { id }, data: { approvalStatus: 'APPROVED' } })
+    audit('post.approve', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id, metadata: { title: post.title } })
+    return post
   })
 
   app.patch('/posts/:id/reject', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
-    return db.aggregatedPost.update({ where: { id }, data: { approvalStatus: 'REJECTED' } })
+    const jwt = req.user as { sub: string; email?: string }
+    const post = await db.aggregatedPost.update({ where: { id }, data: { approvalStatus: 'REJECTED' } })
+    audit('post.reject', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id, metadata: { title: post.title } })
+    return post
   })
 
   app.post('/posts/:id/publish', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
-    const body = z.object({ siteIds: z.array(z.string()).min(1) }).parse(req.body)
+    const body = z.object({
+      siteIds:       z.array(z.string()).min(1),
+      wpStatus:      z.enum(['publish', 'draft', 'future']).default('publish'),
+      scheduledDate: z.string().datetime().optional(),
+    }).parse(req.body)
+
+    if (body.wpStatus === 'future' && !body.scheduledDate) {
+      return reply.code(422).send({ error: 'scheduledDate required when wpStatus is "future"' })
+    }
 
     const post = await db.aggregatedPost.findUniqueOrThrow({ where: { id } })
     if (post.approvalStatus !== 'APPROVED') {
       return reply.code(422).send({ error: 'Post must be approved before publishing' })
     }
 
+    const jwt = req.user as { sub: string; email?: string }
     const tasks = await Promise.all(
       body.siteIds.map(async (siteId) => {
         const task = await db.publishTask.upsert({
           where: { postId_siteId: { postId: id, siteId } },
-          create: { postId: id, siteId, status: 'PENDING' },
-          update: { status: 'PENDING', error: null },
+          create: {
+            postId: id, siteId, status: 'PENDING',
+            wpStatus:      body.wpStatus,
+            scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
+          },
+          update: {
+            status: 'PENDING', error: null,
+            wpStatus:      body.wpStatus,
+            scheduledDate: body.scheduledDate ? new Date(body.scheduledDate) : null,
+          },
         })
         await publishQueue.add('publish-post', { publishTaskId: task.id })
         return task.id
       })
     )
+    audit('post.publish', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id, metadata: { siteIds: body.siteIds, wpStatus: body.wpStatus, title: post.title } })
     return { queued: tasks.length, taskIds: tasks }
   })
 
@@ -97,7 +122,10 @@ export async function postsRoutes(app: FastifyInstance) {
 
   app.delete('/posts/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
     const { id } = req.params as { id: string }
+    const jwt = req.user as { sub: string; email?: string }
+    const post = await db.aggregatedPost.findUnique({ where: { id }, select: { title: true } })
     await db.aggregatedPost.delete({ where: { id } })
+    audit('post.delete', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id, metadata: { title: post?.title } })
     return reply.code(204).send()
   })
 }

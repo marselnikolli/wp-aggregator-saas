@@ -1,21 +1,23 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp } from 'lucide-react'
+import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
 import { dashboardApi } from '@/lib/api'
 
 const nav = [
-  { to: '/',         label: 'Dashboard', icon: LayoutDashboard },
-  { to: '/sites',    label: 'Sites',     icon: Globe           },
-  { to: '/sources',  label: 'Sources',   icon: Rss             },
-  { to: '/posts',    label: 'Posts',     icon: FileText        },
-  { to: '/settings', label: 'Settings',  icon: Settings        },
+  { to: '/',          label: 'Dashboard', icon: LayoutDashboard },
+  { to: '/sites',     label: 'Sites',     icon: Globe           },
+  { to: '/sources',   label: 'Sources',   icon: Rss             },
+  { to: '/posts',     label: 'Posts',     icon: FileText        },
+  { to: '/settings',  label: 'Settings',  icon: Settings        },
+  { to: '/audit-log', label: 'Audit Log', icon: ShieldCheck     },
+  { to: '/team',      label: 'Team',      icon: Users           },
 ]
 
-export function Sidebar() {
+export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { user, logout } = useAuth()
   const navigate = useNavigate()
   const [queueOpen, setQueueOpen] = useState(false)
@@ -59,6 +61,7 @@ export function Sidebar() {
       <nav className="flex flex-1 flex-col gap-1 p-3">
         {nav.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} end={to === '/'}
+            onClick={onNavigate}
             className={({ isActive }) => cn(
               'flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
               isActive ? 'bg-primary/10 text-primary font-medium' : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
@@ -83,8 +86,8 @@ export function Sidebar() {
 
         {queueOpen && queueData && (
           <div className="mt-1 rounded-md border border-border bg-secondary/50 p-3 space-y-3">
-            {(['fetch', 'publish'] as const).map(key => {
-              const d = queueData[key] as { waiting: number; active: number; failed: number }
+            {(['fetch', 'publish', 'summarize'] as const).map(key => {
+              const d = (queueData[key] ?? {}) as { waiting?: number; active?: number; failed?: number }
               return (
                 <div key={key}>
                   <p className="text-xs font-medium text-foreground mb-1 capitalize">{key}</p>
@@ -92,8 +95,8 @@ export function Sidebar() {
                     {(['waiting', 'active', 'failed'] as const).map(k => (
                       <div key={k}>
                         <p className={cn('text-sm font-bold tabular-nums',
-                          k === 'failed' && d[k] > 0 ? 'text-red-400' :
-                          k === 'active' && d[k] > 0 ? 'text-yellow-400' : 'text-foreground')}>
+                          k === 'failed' && (d[k] ?? 0) > 0 ? 'text-red-400' :
+                          k === 'active' && (d[k] ?? 0) > 0 ? 'text-yellow-400' : 'text-foreground')}>
                           {d[k] ?? 0}
                         </p>
                         <p className="text-xs text-muted-foreground">{k}</p>
@@ -103,6 +106,15 @@ export function Sidebar() {
                 </div>
               )
             })}
+            <a
+              href="/admin/queues/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground pt-1 border-t border-border/50"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Queue Inspector
+            </a>
           </div>
         )}
       </div>
