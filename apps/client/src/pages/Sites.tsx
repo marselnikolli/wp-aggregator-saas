@@ -17,10 +17,12 @@ function SiteFormFields({
   form,
   setForm,
   passwordPlaceholder,
+  jwtPlaceholder,
 }: {
   form: Record<string, any>
   setForm: (fn: (p: any) => any) => void
   passwordPlaceholder?: string
+  jwtPlaceholder?: string
 }) {
   return (
     <>
@@ -46,6 +48,16 @@ function SiteFormFields({
             onChange={e => setForm(p => ({ ...p, apiPassword: e.target.value }))} />
         </div>
       </div>
+      <div className="grid gap-1.5">
+        <Label>
+          JWT Token <span className="text-muted-foreground font-normal">(optional — overrides Basic auth)</span>
+        </Label>
+        <Input type="password" placeholder={jwtPlaceholder ?? 'eyJ…'} value={form.jwtToken}
+          onChange={e => setForm(p => ({ ...p, jwtToken: e.target.value }))} />
+        <p className="text-xs text-muted-foreground">
+          Paste a token from the WP JWT Auth plugin, or leave blank and use "Fetch JWT" after saving.
+        </p>
+      </div>
       <div className="border-t border-border pt-3 grid gap-3">
         <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Publish defaults</p>
         <div className="grid grid-cols-2 gap-3">
@@ -67,11 +79,12 @@ function SiteFormFields({
 
 function AddSiteDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
-  const [form, setForm] = useState({ name: '', url: '', apiUser: '', apiPassword: '', defaultCategory: '', defaultAuthorId: '' })
+  const [form, setForm] = useState({ name: '', url: '', apiUser: '', apiPassword: '', jwtToken: '', defaultCategory: '', defaultAuthorId: '' })
 
   const create = useMutation({
     mutationFn: () => sitesApi.create({
       ...form,
+      jwtToken:        form.jwtToken || null,
       defaultCategory: form.defaultCategory || null,
       defaultAuthorId: form.defaultAuthorId ? Number(form.defaultAuthorId) : null,
     }),
@@ -79,7 +92,7 @@ function AddSiteDialog({ open, onClose }: { open: boolean; onClose: () => void }
       qc.invalidateQueries({ queryKey: ['sites'] })
       toast.success('Site added')
       onClose()
-      setForm({ name: '', url: '', apiUser: '', apiPassword: '', defaultCategory: '', defaultAuthorId: '' })
+      setForm({ name: '', url: '', apiUser: '', apiPassword: '', jwtToken: '', defaultCategory: '', defaultAuthorId: '' })
     },
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to add site'),
   })
@@ -109,6 +122,7 @@ function EditSiteDialog({ site, onClose }: { site: any; onClose: () => void }) {
     url:             site.url ?? '',
     apiUser:         site.apiUser ?? '',
     apiPassword:     '',
+    jwtToken:        '',
     defaultCategory: site.defaultCategory ?? '',
     defaultAuthorId: site.defaultAuthorId ? String(site.defaultAuthorId) : '',
   })
@@ -123,6 +137,7 @@ function EditSiteDialog({ site, onClose }: { site: any; onClose: () => void }) {
         defaultAuthorId: form.defaultAuthorId ? Number(form.defaultAuthorId) : null,
       }
       if (form.apiPassword) body.apiPassword = form.apiPassword
+      if (form.jwtToken)    body.jwtToken    = form.jwtToken
       return sitesApi.update(site.id, body)
     },
     onSuccess: () => {
@@ -138,7 +153,9 @@ function EditSiteDialog({ site, onClose }: { site: any; onClose: () => void }) {
       <DialogContent>
         <DialogHeader><DialogTitle>Edit Site</DialogTitle></DialogHeader>
         <div className="grid gap-4 py-2">
-          <SiteFormFields form={form} setForm={setForm} passwordPlaceholder="Leave blank to keep" />
+          <SiteFormFields form={form} setForm={setForm}
+            passwordPlaceholder="Leave blank to keep"
+            jwtPlaceholder={site.hasJwt ? 'Leave blank to keep current token' : 'eyJ…'} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

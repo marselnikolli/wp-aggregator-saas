@@ -15,6 +15,7 @@ const siteBody = z.object({
   url:             z.string().url(),
   apiUser:         z.string().min(1),
   apiPassword:     z.string().min(1),
+  jwtToken:        z.string().optional().nullable(),
   enabled:         z.boolean().optional().default(true),
   defaultCategory: z.string().optional().nullable(),
   defaultAuthorId: z.number().int().positive().optional().nullable(),
@@ -29,11 +30,17 @@ export async function sitesRoutes(app: FastifyInstance) {
 
   app.post('/sites', { preHandler: [app.authenticate] }, async (req, reply) => {
     const body = siteBody.parse(req.body)
+    const { jwtToken, ...rest } = body
     const site = await db.site.create({
-      data: { ...body, apiPassword: encrypt(body.apiPassword) },
+      data: {
+        ...rest,
+        apiPassword: encrypt(rest.apiPassword),
+        ...(jwtToken ? { jwtToken: encrypt(jwtToken) } : {}),
+      },
       select: SITE_SELECT,
     })
-    return reply.code(201).send(site)
+    const { jwtToken: _jwt, ...safesite } = site
+    return reply.code(201).send({ ...safesite, hasJwt: !!site.jwtToken })
   })
 
   app.patch('/sites/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -41,8 +48,11 @@ export async function sitesRoutes(app: FastifyInstance) {
     const body = siteBody.partial().parse(req.body)
     const data: Record<string, unknown> = { ...body }
     if (body.apiPassword) data.apiPassword = encrypt(body.apiPassword)
+    if (body.jwtToken)    data.jwtToken    = encrypt(body.jwtToken)
+    else                  delete data.jwtToken
     const site = await db.site.update({ where: { id }, data, select: SITE_SELECT })
-    return site
+    const { jwtToken: _jwt, ...safesite } = site
+    return { ...safesite, hasJwt: !!site.jwtToken }
   })
 
   app.delete('/sites/:id', { preHandler: [app.authenticate] }, async (req, reply) => {
