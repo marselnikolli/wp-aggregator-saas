@@ -9,7 +9,7 @@ collectDefaultMetrics({ register: registry })
 const postGauge = new Gauge({
   name: 'aggregator_posts_total',
   help: 'Total aggregated posts by status',
-  labelNames: ['approval_status', 'publish_status'],
+  labelNames: ['publish_status'],
   registers: [registry],
 })
 
@@ -44,7 +44,7 @@ export async function metricsRoutes(app: FastifyInstance) {
     // Refresh gauges on each scrape
     const [postGroups, sourceGroups] = await Promise.all([
       db.aggregatedPost.groupBy({
-        by: ['approvalStatus', 'publishStatus'],
+        by: ['publishStatus'],
         _count: { id: true },
       }),
       db.source.groupBy({
@@ -55,7 +55,7 @@ export async function metricsRoutes(app: FastifyInstance) {
 
     postGauge.reset()
     for (const g of postGroups) {
-      postGauge.set({ approval_status: g.approvalStatus, publish_status: g.publishStatus }, g._count.id)
+      postGauge.set({ publish_status: g.publishStatus }, g._count.id)
     }
 
     sourceGauge.reset()

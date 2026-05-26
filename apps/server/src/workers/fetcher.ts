@@ -547,13 +547,13 @@ async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise
       continue
     }
 
-    const blocked = isBlocked(item.title, item.content, blocklist)
+    if (isBlocked(item.title, item.content, blocklist)) continue
+
     const created = await db.aggregatedPost.create({
       data: {
         sourceId: source.id, remoteId: item.remoteId, title: item.title,
         content: item.content, excerpt: item.excerpt, imageUrl: item.imageUrl,
         originalUrl: item.originalUrl, author: item.author, categories: item.categories, hash,
-        approvalStatus: blocked ? 'REJECTED' : source.autoApprove ? 'APPROVED' : 'PENDING',
       },
     })
     // Language detection (sync, best-effort)

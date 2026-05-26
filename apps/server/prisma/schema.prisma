@@ -66,7 +66,6 @@ model Source {
   fieldMap          Json?
   categoryMappings  Json?
   paginationParam   String?
-  autoApprove       Boolean          @default(false)
   tags              String[]         @default([])
   minDelaySec       Int              @default(1)
   userAgent         String?
@@ -101,7 +100,6 @@ model AggregatedPost {
   qualityScore      Int?
   embedding         String?        @db.Text
   semanticDupOf     String?
-  approvalStatus    ApprovalStatus @default(PENDING)
   publishStatus  PublishStatus  @default(DRAFT)
   scheduledDate  DateTime?
   publishedDate  DateTime?
@@ -110,12 +108,9 @@ model AggregatedPost {
   publishTasks   PublishTask[]
 
   @@index([sourceId])
-  @@index([approvalStatus])
   @@index([publishStatus])
   @@index([createdAt])
   @@index([hash])
-  @@index([approvalStatus, createdAt])
-  @@index([sourceId, approvalStatus])
 }
 
 model PublishTask {
@@ -128,6 +123,7 @@ model PublishTask {
   wpStatus         String         @default("publish")
   scheduledDate    DateTime?
   wpPostId         Int?
+  wpUrl            String?
   categoryOverride String?
   tagOverrides     String[]       @default([])
   error            String?
@@ -174,12 +170,6 @@ enum FetchStatus {
   ERROR
 }
 
-enum ApprovalStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
 enum PublishStatus {
   DRAFT
   SCHEDULED
@@ -204,10 +194,14 @@ model Pipeline {
   siteIds         String[] @default([])
   defaultStatus   String   @default("publish")
   // Cron expression, e.g. "0 8 * * *" = every day at 08:00
-  schedule        String?
-  sortOrder       Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  schedule             String?
+  categoryFilter       String[] @default([])
+  translateTo          String?
+  targetCategory       String?
+  publishWindowHours   Int      @default(0)
+  sortOrder            Int      @default(0)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   @@index([enabled])
 }

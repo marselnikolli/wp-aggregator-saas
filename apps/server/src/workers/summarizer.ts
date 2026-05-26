@@ -110,7 +110,7 @@ async function processPost(postId: string) {
     select: {
       id: true, sourceId: true, title: true, content: true, excerpt: true, imageUrl: true,
       aiSummary: true, aiTitle: true, language: true, categories: true,
-      approvalStatus: true, qualityScore: true, embedding: true, semanticDupOf: true,
+      qualityScore: true, embedding: true, semanticDupOf: true,
     },
   })
 
@@ -138,8 +138,6 @@ async function processPost(postId: string) {
     }
 
     if (result) {
-      const thresholdRow = await getSettingValue('quality_threshold')
-      const threshold = thresholdRow ? Number(thresholdRow) : 0
       const extraCategories = [
         ...result.keywords.filter(k => !post.categories.includes(k)),
         ...(result.category && !post.categories.includes(result.category) ? [result.category] : []),
@@ -152,8 +150,6 @@ async function processPost(postId: string) {
           excerpt:        (!post.excerpt || post.excerpt.length < 30) && result.excerpt ? result.excerpt : undefined,
           categories:     extraCategories.length ? [...post.categories, ...extraCategories] : undefined,
           qualityScore,
-          approvalStatus: threshold > 0 && qualityScore >= threshold && post.approvalStatus === 'PENDING'
-            ? 'APPROVED' : undefined,
         },
       })
       // Reload post with updated AI fields for embedding
@@ -173,7 +169,6 @@ async function processPost(postId: string) {
               data: {
                 embedding:     JSON.stringify(emb),
                 semanticDupOf: dupOf2 ?? undefined,
-                ...(dupOf2 ? { approvalStatus: 'REJECTED' } : {}),
               },
             })
             if (dupOf2) console.info(`[summarizer] Post ${postId} semantic dup of ${dupOf2} — rejected`)
@@ -184,16 +179,7 @@ async function processPost(postId: string) {
     }
   }
 
-  // Update quality score even if no AI keys configured; auto-approve if threshold met
-  const thresholdRow = await getSettingValue('quality_threshold')
-  const threshold = thresholdRow ? Number(thresholdRow) : 0
-
-  const approvalUpdate: Record<string, unknown> = { qualityScore }
-  if (threshold > 0 && qualityScore >= threshold && post.approvalStatus === 'PENDING') {
-    approvalUpdate.approvalStatus = 'APPROVED'
-  }
-
-  await db.aggregatedPost.update({ where: { id: postId }, data: approvalUpdate })
+  await db.aggregatedPost.update({ where: { id: postId }, data: { qualityScore } })
 
   // Semantic duplicate detection (runs after main update to avoid blocking it)
   if (!post.embedding && !post.semanticDupOf) {
@@ -208,7 +194,6 @@ async function processPost(postId: string) {
           data: {
             embedding:    JSON.stringify(embedding),
             semanticDupOf: dupOf ?? undefined,
-            ...(dupOf ? { approvalStatus: 'REJECTED' } : {}),
           },
         })
         if (dupOf) {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  CheckCircle, XCircle, Upload, Trash2, FileText,
+  Upload, Trash2, FileText,
   Loader2, ExternalLink, ChevronLeft, ChevronRight,
   Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles,
 } from 'lucide-react'
@@ -18,7 +18,6 @@ import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { RichTextEditor } from '@/components/RichTextEditor'
 
-const TABS     = ['PENDING', 'APPROVED', 'REJECTED'] as const
 const PER_PAGE = [10, 25, 50, 100] as const
 
 const DATE_PRESETS = [
@@ -31,8 +30,6 @@ const DATE_PRESETS = [
 
 const SHORTCUTS = [
   { key: 'j / k', desc: 'Navigate posts' },
-  { key: 'a',     desc: 'Approve post'   },
-  { key: 'r',     desc: 'Reject post'    },
   { key: 'e',     desc: 'Toggle edit'    },
   { key: 'Esc',   desc: 'Cancel / clear' },
 ]
@@ -43,9 +40,9 @@ function dateFromPreset(days: number) {
 }
 
 const WP_STATUS_OPTIONS = [
-  { value: 'publish', label: 'Publish now',   desc: 'Go live immediately' },
-  { value: 'draft',   label: 'Save as draft', desc: 'Hidden until manually published' },
-  { value: 'future',  label: 'Schedule',      desc: 'Publish at a specific time' },
+  { value: 'publish', label: 'Publish now' },
+  { value: 'draft',   label: 'Save as draft' },
+  { value: 'future',  label: 'Schedule' },
 ] as const
 
 interface SiteTarget {
@@ -57,8 +54,8 @@ interface SiteTarget {
 }
 
 function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
-  const [targets,     setTargets]     = useState<Record<string, SiteTarget>>({})
-  const [expandedId,  setExpandedId]  = useState<string | null>(null)
+  const [targets,    setTargets]    = useState<Record<string, SiteTarget>>({})
+  const [expandedId, setExpandedId] = useState<string | null>(null)
   const { data: sites } = useQuery({ queryKey: ['sites'], queryFn: sitesApi.list })
   const qc = useQueryClient()
 
@@ -83,7 +80,7 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
       wpStatus:         t.wpStatus,
       scheduledDate:    t.wpStatus === 'future' && t.scheduleAt ? new Date(t.scheduleAt).toISOString() : undefined,
       categoryOverride: t.categoryOverride || undefined,
-      tagOverrides:     t.tagOverrides ? t.tagOverrides.split(',').map(s => s.trim()).filter(Boolean) : undefined,
+      tagOverrides:     t.tagOverrides ? t.tagOverrides.split(',').map((s: string) => s.trim()).filter(Boolean) : undefined,
     }))),
     onSuccess: (d) => {
       toast.success(`Queued for ${d.queued} site(s)`)
@@ -99,7 +96,6 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
         <DialogHeader><DialogTitle>Publish to Sites</DialogTitle></DialogHeader>
         <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto pr-1">
           <p className="text-sm text-muted-foreground">Destination for: <strong>{post?.title}</strong></p>
-
           {sites?.map((site: any) => {
             const t = targets[site.id]
             const checked = !!t
@@ -140,7 +136,7 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
                       </div>
                     )}
                     <div>
-                      <Label className="text-xs">Category override <span className="text-muted-foreground">(optional)</span></Label>
+                      <Label className="text-xs">Category override</Label>
                       <Input className="mt-1 h-8 text-xs" placeholder="e.g. Technology" value={t.categoryOverride}
                         onChange={e => update(site.id, 'categoryOverride', e.target.value)} />
                     </div>
@@ -186,7 +182,6 @@ function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void })
 }
 
 export function Posts() {
-  const [tab,           setTab]           = useState<typeof TABS[number]>('PENDING')
   const [page,          setPage]          = useState(1)
   const [perPage,       setPerPage]       = useState(25)
   const [sourceId,      setSourceId]      = useState('')
@@ -198,19 +193,20 @@ export function Posts() {
   const [editMode,      setEditMode]      = useState(false)
   const [draft,         setDraft]         = useState({ title: '', excerpt: '', content: '' })
   const [shortcutHelp,  setShortcutHelp]  = useState(false)
+  const [bulkSiteId,    setBulkSiteId]    = useState('')
+  const [bulkDialog,    setBulkDialog]    = useState(false)
   const qc = useQueryClient()
 
   useEffect(() => { setPage(1); setCategory('') }, [sourceId])
-  useEffect(() => { setPage(1) }, [tab, category, dateDays, perPage])
-  useEffect(() => { setCheckedIds(new Set()) }, [tab, page])
+  useEffect(() => { setPage(1) }, [category, dateDays, perPage])
+  useEffect(() => { setCheckedIds(new Set()) }, [page])
   useEffect(() => { setEditMode(false) }, [selected?.id])
 
   const dateFrom = useMemo(() => dateFromPreset(dateDays), [dateDays])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['posts', tab, page, perPage, sourceId, category, dateDays],
+    queryKey: ['posts', page, perPage, sourceId, category, dateDays],
     queryFn: () => postsApi.list({
-      approvalStatus: tab,
       page,
       per_page: perPage,
       ...(sourceId && { sourceId }),
@@ -224,6 +220,11 @@ export function Posts() {
   const { data: sourcesData } = useQuery({
     queryKey: ['sources', 'all'],
     queryFn:  () => sourcesApi.list({ per_page: 100 }),
+  })
+
+  const { data: sitesData } = useQuery({
+    queryKey: ['sites'],
+    queryFn:  sitesApi.list,
   })
 
   const { data: categories } = useQuery({
@@ -243,14 +244,6 @@ export function Posts() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['posts'] })
 
-  const approve = useMutation({
-    mutationFn: (id: string) => postsApi.approve(id),
-    onSuccess: () => { invalidate(); toast.success('Approved') },
-  })
-  const reject = useMutation({
-    mutationFn: (id: string) => postsApi.reject(id),
-    onSuccess: () => { invalidate(); toast.success('Rejected') },
-  })
   const remove = useMutation({
     mutationFn: (id: string) => postsApi.remove(id),
     onSuccess: () => { invalidate(); toast.success('Deleted') },
@@ -267,24 +260,6 @@ export function Posts() {
     onError: (e: any) => toast.error(e.response?.data?.error ?? 'Update failed'),
   })
 
-  const bulkApprove = useMutation({
-    mutationFn: () => Promise.allSettled([...checkedIds].map(id => postsApi.approve(id))),
-    onSuccess: (results) => {
-      const ok = results.filter(r => r.status === 'fulfilled').length
-      const err = results.filter(r => r.status === 'rejected').length
-      err ? toast.error(`${ok} approved, ${err} failed`) : toast.success(`${ok} posts approved`)
-      invalidate(); setCheckedIds(new Set())
-    },
-  })
-  const bulkReject = useMutation({
-    mutationFn: () => Promise.allSettled([...checkedIds].map(id => postsApi.reject(id))),
-    onSuccess: (results) => {
-      const ok = results.filter(r => r.status === 'fulfilled').length
-      const err = results.filter(r => r.status === 'rejected').length
-      err ? toast.error(`${ok} rejected, ${err} failed`) : toast.success(`${ok} posts rejected`)
-      invalidate(); setCheckedIds(new Set())
-    },
-  })
   const bulkRemove = useMutation({
     mutationFn: () => Promise.allSettled([...checkedIds].map(id => postsApi.remove(id))),
     onSuccess: (results) => {
@@ -293,6 +268,15 @@ export function Posts() {
       err ? toast.error(`${ok} deleted, ${err} failed`) : toast.success(`${ok} posts deleted`)
       invalidate(); setCheckedIds(new Set())
     },
+  })
+
+  const bulkPublish = useMutation({
+    mutationFn: () => postsApi.bulkPublish({ postIds: [...checkedIds], siteId: bulkSiteId }),
+    onSuccess: (d: any) => {
+      toast.success(`Queued ${d.queued} publish tasks`)
+      invalidate(); setCheckedIds(new Set()); setBulkDialog(false)
+    },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Bulk publish failed'),
   })
 
   function toggleCheck(id: string, e: React.MouseEvent) {
@@ -320,8 +304,6 @@ export function Posts() {
       switch (e.key) {
         case 'j': if (idx < posts.length - 1) setSelected(posts[idx + 1]); break
         case 'k': if (idx > 0) setSelected(posts[idx - 1]); break
-        case 'a': if (selected && !approve.isPending) approve.mutate(selected.id); break
-        case 'r': if (selected && !reject.isPending) reject.mutate(selected.id); break
         case 'e':
           if (selected) {
             if (editMode) { setEditMode(false) }
@@ -336,14 +318,17 @@ export function Posts() {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [posts, selected, editMode, checkedIds, approve.isPending, reject.isPending])
+  }, [posts, selected, editMode, checkedIds])
 
   const allChecked  = posts.length > 0 && checkedIds.size === posts.length
   const someChecked = checkedIds.size > 0 && checkedIds.size < posts.length
 
-  // Content sanitized server-side by cheerio before DB storage (scripts/ads stripped)
-  const htmlContent = selected?.content
-    ?? (selected?.excerpt ? `<p>${selected.excerpt.replace(/<[^>]+>/g, '')}</p>` : '<p><em>No content available.</em></p>')
+  // Content is sanitized server-side by the cheerio pipeline before DB storage
+  const rawHtml = selected?.content ?? ''
+  const fallbackHtml = selected?.excerpt
+    ? `<blockquote>${selected.excerpt.replace(/<[^>]+>/g, '')}</blockquote><p style="color:var(--muted-foreground);font-style:italic;font-size:0.75rem">Full content not available</p>`
+    : '<p><em>No content available.</em></p>'
+  const htmlContent = rawHtml || fallbackHtml
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -377,15 +362,6 @@ export function Posts() {
               {DATE_PRESETS.map(p => <option key={p.days} value={p.days}>{p.label}</option>)}
             </select>
           </div>
-          <div className="flex gap-1 pt-0.5">
-            {TABS.map(t => (
-              <button key={t} onClick={() => setTab(t)}
-                className={cn('flex-1 py-1.5 text-xs font-medium rounded-md transition-colors',
-                  tab === t ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground')}>
-                {t.charAt(0) + t.slice(1).toLowerCase()}
-              </button>
-            ))}
-          </div>
         </div>
 
         {/* Bulk action bar */}
@@ -393,13 +369,8 @@ export function Posts() {
           <div className="shrink-0 flex items-center gap-1.5 px-3 py-2 bg-primary/5 border-b border-border">
             <span className="text-xs text-muted-foreground flex-1">{checkedIds.size} selected</span>
             <button onClick={() => setCheckedIds(new Set())} className="text-xs text-muted-foreground hover:text-foreground mr-1">Clear</button>
-            <Button size="sm" variant="outline" className="h-7 text-xs text-emerald-400 border-emerald-400/30 hover:bg-emerald-400/10"
-              onClick={() => bulkApprove.mutate()} disabled={bulkApprove.isPending}>
-              {bulkApprove.isPending ? <Loader2 className="animate-spin" /> : <CheckCircle />}Approve
-            </Button>
-            <Button size="sm" variant="outline" className="h-7 text-xs text-red-400 border-red-400/30 hover:bg-red-400/10"
-              onClick={() => bulkReject.mutate()} disabled={bulkReject.isPending}>
-              {bulkReject.isPending ? <Loader2 className="animate-spin" /> : <XCircle />}Reject
+            <Button size="sm" className="h-7 text-xs" onClick={() => { setBulkSiteId(''); setBulkDialog(true) }}>
+              <Upload className="h-3 w-3 mr-1" />Publish to…
             </Button>
             <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive"
               onClick={() => bulkRemove.mutate()} disabled={bulkRemove.isPending}>
@@ -429,7 +400,7 @@ export function Posts() {
           ) : !posts.length ? (
             <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground py-16">
               <FileText className="h-8 w-8 opacity-25" />
-              <p className="text-sm">No {tab.toLowerCase()} posts</p>
+              <p className="text-sm">No posts</p>
             </div>
           ) : (
             <div className="p-2 space-y-1">
@@ -489,16 +460,17 @@ export function Posts() {
         </div>
       </div>
 
-      {/* Right panel */}
+      {/* Right panel — preview pane */}
       {selected ? (
         <div className="flex-[1] min-w-0 flex flex-col overflow-hidden">
-          <div className="shrink-0 px-5 py-4 border-b border-border">
+          {/* Action bar */}
+          <div className="shrink-0 px-5 py-3 border-b border-border">
             {editMode ? (
               <div className="space-y-2">
                 <Input value={draft.title} onChange={e => setDraft(p => ({ ...p, title: e.target.value }))}
                   className="text-sm font-semibold h-8" placeholder="Title" />
                 <textarea value={draft.excerpt} onChange={e => setDraft(p => ({ ...p, excerpt: e.target.value }))}
-                  rows={3} placeholder="Excerpt"
+                  rows={2} placeholder="Excerpt"
                   className="w-full rounded-md border border-border bg-secondary/50 px-3 py-2 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground" />
                 <div className="flex gap-1.5">
                   <Button size="sm" className="h-7 text-xs" onClick={() => updatePost.mutate(draft)} disabled={updatePost.isPending}>
@@ -510,96 +482,88 @@ export function Posts() {
                 </div>
               </div>
             ) : (
-              <>
-                <div className="flex-1 min-w-0">
-                  <h2 className="text-sm font-semibold leading-snug">
-                    {selected.aiTitle ?? selected.title}
-                    {selected.aiTitle && <Sparkles className="inline h-3 w-3 ml-1.5 text-violet-400" />}
-                  </h2>
-                  {selected.aiTitle && selected.aiTitle !== selected.title && (
-                    <p className="text-xs text-muted-foreground line-clamp-1 mt-0.5 opacity-60">Original: {selected.title}</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-1.5 text-xs text-muted-foreground">
-                    <span>{selected.source?.name}</span>
-                    {selected.categories?.length > 0 && (<><span>·</span><span>{selected.categories.join(', ')}</span></>)}
-                    <span>·</span>
-                    <span>{format(new Date(selected.createdAt), 'dd MMM yyyy')}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 mt-1.5">
-                    <Badge variant={selected.approvalStatus === 'APPROVED' ? 'success' : selected.approvalStatus === 'REJECTED' ? 'destructive' : 'secondary'} className="text-xs">
-                      {selected.approvalStatus}
-                    </Badge>
-                    {selected.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
-                    {selected.language && selected.language !== 'en' && (
-                      <Badge variant="outline" className="text-xs font-mono">{selected.language}</Badge>
-                    )}
-                    {selected.qualityScore != null && (
-                      <Badge variant="outline" className={`text-xs ${selected.qualityScore >= 60 ? 'text-emerald-400 border-emerald-500/30' : selected.qualityScore >= 30 ? 'text-yellow-400 border-yellow-500/30' : 'text-muted-foreground'}`}>
-                        Q:{selected.qualityScore}
-                      </Badge>
-                    )}
-                    {selected.semanticDupOf && (
-                      <Badge variant="outline" className="text-xs text-orange-400 border-orange-500/30">Semantic dup</Badge>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 mt-3">
-                  {selected.originalUrl && (
-                    <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground shrink-0" asChild>
-                      <a href={selected.originalUrl} target="_blank" rel="noopener noreferrer">
-                        <ExternalLink className="h-3.5 w-3.5" />
-                      </a>
-                    </Button>
-                  )}
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground shrink-0"
-                    onClick={() => { setDraft({ title: selected.title ?? '', excerpt: selected.excerpt ?? '', content: selected.content ?? '' }); setEditMode(true) }}>
-                    <Pencil className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-1.5">
+                {selected.originalUrl && (
+                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground shrink-0" asChild>
+                    <a href={selected.originalUrl} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
                   </Button>
-                  {tab === 'PENDING' && (
-                    <>
-                      <Button size="sm" variant="outline" className="h-7 text-xs text-emerald-400 border-emerald-400/30 hover:bg-emerald-400/10"
-                        onClick={() => approve.mutate(selected.id)} disabled={approve.isPending}>
-                        {approve.isPending ? <Loader2 className="animate-spin" /> : <CheckCircle />}Approve
-                      </Button>
-                      <Button size="sm" variant="outline" className="h-7 text-xs text-red-400 border-red-400/30 hover:bg-red-400/10"
-                        onClick={() => reject.mutate(selected.id)} disabled={reject.isPending}>
-                        {reject.isPending ? <Loader2 className="animate-spin" /> : <XCircle />}Reject
-                      </Button>
-                    </>
-                  )}
-                  {tab === 'APPROVED' && selected.publishStatus !== 'PUBLISHED' && (
-                    <Button size="sm" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
-                      <Upload />Publish
-                    </Button>
-                  )}
-                  {selected.publishStatus === 'PUBLISHED' && (
-                    <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
-                      <Upload />Republish
-                    </Button>
-                  )}
-                  <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive ml-auto"
-                    onClick={() => remove.mutate(selected.id)} disabled={remove.isPending}>
-                    {remove.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                  </Button>
-                </div>
-              </>
+                )}
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground shrink-0"
+                  onClick={() => { setDraft({ title: selected.title ?? '', excerpt: selected.excerpt ?? '', content: selected.content ?? '' }); setEditMode(true) }}>
+                  <Pencil className="h-3.5 w-3.5" />
+                </Button>
+                <Button size="sm" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
+                  <Upload className="h-3 w-3 mr-1" />Publish
+                </Button>
+                <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive ml-auto"
+                  onClick={() => remove.mutate(selected.id)} disabled={remove.isPending}>
+                  {remove.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                </Button>
+              </div>
             )}
           </div>
 
-          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-            {selected.imageUrl && (
-              <img src={selected.imageUrl} alt="" className="w-full rounded-md object-cover max-h-52"
-                onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-            )}
-            {selected.aiSummary && !editMode && (
-              <div className="rounded-md bg-violet-500/10 border border-violet-500/20 px-3 py-2.5 text-xs text-foreground/80 leading-relaxed">
-                <div className="flex items-center gap-1.5 mb-1.5 text-violet-400">
-                  <Sparkles className="h-3 w-3" />
-                  <span className="font-medium text-xs">AI Summary</span>
+          {/* Scrollable content */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 pb-10">
+            {!editMode && (
+              <div className="space-y-3 mb-4">
+                {/* Featured image — full width, natural aspect ratio */}
+                {selected.imageUrl && (
+                  <img src={selected.imageUrl} alt=""
+                    className="w-full rounded-lg object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                )}
+
+                {/* Title */}
+                <h1 className="text-base font-semibold leading-snug mt-2">
+                  {selected.aiTitle ?? selected.title}
+                  {selected.aiTitle && <Sparkles className="inline h-3.5 w-3.5 ml-1.5 text-violet-400" />}
+                </h1>
+                {selected.aiTitle && selected.aiTitle !== selected.title && (
+                  <p className="text-xs text-muted-foreground opacity-60 -mt-2">Original: {selected.title}</p>
+                )}
+
+                {/* Byline */}
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground/70">{selected.source?.name}</span>
+                  {selected.author && <><span>·</span><span>{selected.author}</span></>}
+                  <span>·</span>
+                  <span>{format(new Date(selected.createdAt), 'dd MMM yyyy, HH:mm')}</span>
                 </div>
-                {selected.aiSummary}
+
+                {/* Badges */}
+                <div className="flex flex-wrap gap-1.5">
+                  {selected.categories?.map((c: string) => (
+                    <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
+                  ))}
+                  {selected.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
+                  {selected.language && selected.language !== 'en' && (
+                    <Badge variant="outline" className="text-xs font-mono">{selected.language}</Badge>
+                  )}
+                  {selected.qualityScore != null && (
+                    <Badge variant="outline" className={`text-xs ${selected.qualityScore >= 60 ? 'text-emerald-400 border-emerald-500/30' : selected.qualityScore >= 30 ? 'text-yellow-400 border-yellow-500/30' : 'text-muted-foreground'}`}>
+                      Q:{selected.qualityScore}
+                    </Badge>
+                  )}
+                  {selected.semanticDupOf && (
+                    <Badge variant="outline" className="text-xs text-orange-400 border-orange-500/30">Semantic dup</Badge>
+                  )}
+                </div>
+
+                {/* AI Summary */}
+                {selected.aiSummary && (
+                  <div className="rounded-md bg-violet-500/10 border border-violet-500/20 px-3 py-2.5 text-xs text-foreground/80 leading-relaxed">
+                    <div className="flex items-center gap-1.5 mb-1.5 text-violet-400">
+                      <Sparkles className="h-3 w-3" /><span className="font-medium">AI Summary</span>
+                    </div>
+                    {selected.aiSummary}
+                  </div>
+                )}
               </div>
             )}
+
             {editMode ? (
               <RichTextEditor
                 value={draft.content ?? ''}
@@ -607,6 +571,7 @@ export function Posts() {
                 placeholder="Write content…"
               />
             ) : (
+              /* Content is sanitized server-side by the 10-pass cheerio pipeline */
               <div
                 className={[
                   'text-sm text-foreground/90 leading-relaxed',
@@ -622,6 +587,7 @@ export function Posts() {
                   '[&_iframe]:w-full [&_iframe]:aspect-video [&_iframe]:rounded-md [&_iframe]:my-3',
                   '[&_figure]:my-3 [&_figcaption]:text-xs [&_figcaption]:text-muted-foreground [&_figcaption]:mt-1',
                 ].join(' ')}
+                // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: htmlContent }}
               />
             )}
@@ -635,6 +601,28 @@ export function Posts() {
           </div>
         </div>
       )}
+
+      {/* Bulk publish dialog */}
+      <Dialog open={bulkDialog} onOpenChange={setBulkDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Bulk Publish {checkedIds.size} Posts</DialogTitle></DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label className="text-xs">Destination site</Label>
+            <select value={bulkSiteId} onChange={e => setBulkSiteId(e.target.value)}
+              className="w-full h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+              <option value="">Select a site…</option>
+              {sitesData?.map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkDialog(false)}>Cancel</Button>
+            <Button onClick={() => bulkPublish.mutate()} disabled={!bulkSiteId || bulkPublish.isPending}>
+              {bulkPublish.isPending && <Loader2 className="animate-spin" />}
+              Publish {checkedIds.size} posts
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {publishTarget && (
         <PublishDialog post={publishTarget} open={!!publishTarget} onClose={() => setPublishTarget(null)} />

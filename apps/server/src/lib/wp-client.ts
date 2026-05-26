@@ -127,6 +127,14 @@ export class WPClient {
     return res.json() as Promise<{ id: number; link: string }>
   }
 
+  async getCategories(): Promise<{ id: number; name: string; slug: string }[]> {
+    const res = await fetch(`${this.base}/categories?per_page=100`, {
+      headers: { 'Authorization': this.auth },
+    })
+    if (!res.ok) throw new Error(`WP categories error ${res.status}`)
+    return res.json() as Promise<{ id: number; name: string; slug: string }[]>
+  }
+
   async testConnection(): Promise<boolean> {
     try {
       const res = await fetch(`${this.base}/users/me`, {

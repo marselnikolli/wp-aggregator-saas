@@ -46,7 +46,6 @@ const sourceUpdateBody = z.object({
   interval:          z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
   username:          z.string().optional(),
   password:          z.string().optional(),
-  autoApprove:       z.boolean().optional(),
   tags:              z.array(z.string()).optional(),
   minDelaySec:       z.number().int().min(0).max(60).optional(),
   fieldMap:          z.record(z.string()).nullable().optional(),

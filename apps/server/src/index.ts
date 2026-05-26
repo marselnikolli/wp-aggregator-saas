@@ -138,6 +138,14 @@ async function bootstrap() {
     await applyScheduledPublishSettings()
   }
 
+  async function purgeOldAuditLogs() {
+    const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000)
+    const { count } = await db.auditLog.deleteMany({ where: { createdAt: { lt: cutoff } } })
+    if (count > 0) console.log(`[cleanup] deleted ${count} audit log entries`)
+  }
+  await purgeOldAuditLogs()
+  setInterval(purgeOldAuditLogs, 4 * 60 * 60 * 1000)
+
   await app.listen({ port: config.PORT, host: '0.0.0.0' })
   await seedFirstAdmin()
   console.log(`Server running on http://localhost:${config.PORT}`)

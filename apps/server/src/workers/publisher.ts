@@ -134,18 +134,20 @@ async function runPublishTask(taskId: string) {
   }
 
   let finalWpPostId: number
+  let finalWpUrl: string | undefined
   if (task.wpPostId) {
-    // Re-publish: update existing WP post
     const result = await client.updatePost(task.wpPostId, payload)
     finalWpPostId = result.id
+    finalWpUrl = result.link
   } else {
     const result = await client.createPost(payload)
     finalWpPostId = result.id
+    finalWpUrl = result.link
   }
 
   await db.publishTask.update({
     where: { id: taskId },
-    data: { status: 'DONE', wpPostId: finalWpPostId },
+    data: { status: 'DONE', wpPostId: finalWpPostId, wpUrl: finalWpUrl ?? null },
   })
 
   await db.site.update({

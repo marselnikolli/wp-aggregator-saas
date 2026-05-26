@@ -8,7 +8,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
     const [sites, sources, pending, published, recentJobs] = await Promise.all([
       db.site.count({ where: { enabled: true } }),
       db.source.count({ where: { enabled: true } }),
-      db.aggregatedPost.count({ where: { approvalStatus: 'PENDING' } }),
+      db.aggregatedPost.count({ where: { publishStatus: 'DRAFT' } }),
       db.aggregatedPost.count({ where: { publishStatus: 'PUBLISHED' } }),
       db.fetchJob.findMany({
         take: 10,

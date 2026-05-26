@@ -57,4 +57,21 @@ export async function sitesRoutes(app: FastifyInstance) {
     const ok = await client.testConnection()
     return { ok }
   })
+
+  // Proxy WP categories — cached 10 min in Redis
+  app.get('/sites/:id/categories', { preHandler: [app.authenticate] }, async (req) => {
+    const { id } = req.params as { id: string }
+    const { redis } = await import('../queue.js')
+    const { decrypt } = await import('../lib/crypto.js')
+
+    const cacheKey = `wp-cats:${id}`
+    const cached = await redis.get(cacheKey)
+    if (cached) return JSON.parse(cached)
+
+    const site = await db.site.findUniqueOrThrow({ where: { id } })
+    const client = new WPClient(site.url, site.apiUser, decrypt(site.apiPassword))
+    const cats = await client.getCategories()
+    await redis.set(cacheKey, JSON.stringify(cats), 'EX', 600)
+    return cats
+  })
 }

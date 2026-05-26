@@ -41,7 +41,7 @@ export function startSchedPublishWorker() {
     if (!siteIds.length) return { published: 0 }
 
     const posts = await db.aggregatedPost.findMany({
-      where: { approvalStatus: 'APPROVED', publishStatus: 'DRAFT' },
+      where: { publishStatus: 'DRAFT' },
       take: max,
       orderBy: { createdAt: 'asc' },
       select: { id: true },

@@ -369,7 +369,6 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
     interval:    source.interval ?? '',
     username:    source.username ?? '',
     password:    '',
-    autoApprove:  source.autoApprove ?? false,
     tags:         (source.tags ?? []) as string[],
     minDelaySec:  source.minDelaySec ?? 1,
     userAgent:    source.userAgent ?? '',
@@ -400,7 +399,6 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
         type:        form.type,
         interval:    form.interval || null,
         username:    form.username || null,
-        autoApprove:  form.autoApprove,
         tags:         form.tags,
         minDelaySec:  form.minDelaySec,
         userAgent:    form.userAgent || null,
@@ -527,14 +525,6 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
               </div>
             </>
           )}
-          <label className="flex items-center justify-between rounded-md border border-border px-3 py-2.5 cursor-pointer hover:bg-secondary/50">
-            <div>
-              <p className="text-sm font-medium">Auto-approve fetched posts</p>
-              <p className="text-xs text-muted-foreground">Skip the review queue — posts go straight to approved</p>
-            </div>
-            <Switch checked={form.autoApprove}
-              onCheckedChange={v => setForm(p => ({ ...p, autoApprove: v }))} />
-          </label>
           <div className="grid gap-1.5">
             <Label className="text-xs">Source Tags</Label>
             <div className="flex gap-1.5">
@@ -898,8 +888,8 @@ export function Sources() {
                         {src.interval && (
                           <Badge variant="secondary" className="text-xs">{src.interval}</Badge>
                         )}
-                        {src.autoApprove && (
-                          <Badge variant="secondary" className="text-xs text-emerald-400 border-emerald-500/30 bg-emerald-500/10">Auto-approve</Badge>
+                        {false && (
+                          <Badge variant="secondary" className="text-xs">unused</Badge>
                         )}
                         {src.tags?.map((t: string) => (
                           <Badge key={t} variant="outline" className="text-xs cursor-pointer hover:bg-secondary"
