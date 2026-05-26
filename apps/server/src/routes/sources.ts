@@ -269,10 +269,15 @@ export async function sourcesRoutes(app: FastifyInstance) {
       const job = await fetchQueue.getJob(jobId)
       if (job?.data?.sourceId) send({ type: 'job:failed', sourceId: job.data.sourceId, error: failedReason })
     }
+    async function onProgress({ jobId, data }: { jobId: string; data: unknown }) {
+      const job = await fetchQueue.getJob(jobId)
+      if (job?.data?.sourceId) send({ type: 'job:progress', sourceId: job.data.sourceId, progress: data })
+    }
 
     fetchQueueEvents.on('active',    onActive)
     fetchQueueEvents.on('completed', onCompleted)
     fetchQueueEvents.on('failed',    onFailed)
+    fetchQueueEvents.on('progress',  onProgress)
 
     const keepAlive = setInterval(() => { if (!res.writableEnded) res.write(': keepalive\n\n') }, 30_000)
 
@@ -282,6 +287,7 @@ export async function sourcesRoutes(app: FastifyInstance) {
         fetchQueueEvents.off('active',    onActive)
         fetchQueueEvents.off('completed', onCompleted)
         fetchQueueEvents.off('failed',    onFailed)
+        fetchQueueEvents.off('progress',  onProgress)
         resolve()
       })
     )

@@ -9,6 +9,7 @@ import { Posts }     from '@/pages/Posts'
 import { Settings }  from '@/pages/Settings'
 import { AuditLog }  from '@/pages/AuditLog'
 import { Team }      from '@/pages/Team'
+import { Pipelines } from '@/pages/Pipelines'
 import { Login }     from '@/pages/Login'
 import { Skeleton }  from '@/components/ui/skeleton'
 
@@ -46,7 +47,8 @@ function AppRoutes() {
         <Route path="posts"    element={<Posts />} />
         <Route path="settings"  element={<Settings />} />
         <Route path="audit-log" element={<AuditLog />} />
-        <Route path="team"      element={<Team />} />
+        <Route path="team"       element={<Team />} />
+        <Route path="pipelines"  element={<Pipelines />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

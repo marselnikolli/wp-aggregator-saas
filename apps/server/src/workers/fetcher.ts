@@ -9,9 +9,19 @@ import { decrypt } from '../lib/crypto.js'
 import { SourceType } from '@prisma/client'
 import { unwrapResponse, resolveDotPath, tryParseBody } from '../lib/customApi.js'
 import { summarizeQueue } from './summarizer.js'
+import { uploadImageFromUrl, slugify } from '../lib/image-storage.js'
 import { franc } from 'franc'
 
-const rss = new Parser({ timeout: 10000 })
+const rss = new Parser({
+  timeout: 10000,
+  customFields: {
+    item: [
+      ['media:content',   'media:content',   { keepArray: false }],
+      ['media:thumbnail', 'media:thumbnail', { keepArray: false }],
+      ['media:group',     'media:group',     { keepArray: false }],
+    ],
+  },
+})
 
 const ALLOWED_IFRAME_HOSTS = [
   'youtube.com', 'youtu.be', 'youtube-nocookie.com', 'player.vimeo.com', 'vimeo.com',
@@ -20,26 +30,125 @@ const ALLOWED_IFRAME_HOSTS = [
   'rumble.com', 'bitchute.com', 'odysee.com',
 ]
 
+const MAX_PER_FETCH = 15
+
 const AD_PATTERN = /\b(ad|ads|advert|advertisement|adsense|adsbygoogle|google-ad|googlead|gam|dfp|banner-ad|ad-slot|ad-unit|ad-container|ad-wrapper|ad-banner|sponsor|sponsored|outbrain|taboola|revcontent|mgid|zedo|inread|inarticle|natve|native-ad|pub-\d)/i
+
+// WP and news-site boilerplate blocks to remove entirely by CSS selector
+const BOILERPLATE_SELECTORS = [
+  // WP social share plugins
+  '.sharedaddy', '.jp-relatedposts', '.yarpp-related',
+  '.addtoany_share_save_container', '.wp-block-social-links',
+  // Subscription / newsletter widgets
+  '.subscribe-box', '.newsletter-box', '.mc4wp-form', '.mailchimp-form',
+  // Comment sections
+  '#comments', '.comments-area', '.comment-respond',
+  // Author / tag / category metadata boxes
+  '.author-box', '.author-info', '.post-author', '.tags-box', '.post-tags',
+  '.post-categories', '.entry-footer', '.post-footer',
+  // Cookie & GDPR notices
+  '.cookie-notice', '.gdpr-notice', '.cookie-bar',
+  // "Read also" / related post widgets (Albanian: "Lexo edhe:")
+  '.related-posts', '.related-articles', '.related-post-box',
+  '[class*="related-"]', '[id*="related-"]',
+  // Misc noise
+  '.printfriendly', '.wpcf7', '.wp-polls',
+].join(',')
 
 function cleanContent(html: string): string {
   if (!html) return html
   const $ = cheerio.load(html)
-  $('script, style, noscript').remove()
-  $('ins').remove()
-  $('iframe').each((_, el) => {
-    const src = $(el).attr('src') ?? $(el).attr('data-src') ?? ''
+
+  // Pass 1 — scripts, styles, interactive elements
+  $('script, style, noscript, ins, form, input, button, select, textarea, canvas, svg').remove()
+
+  // Pass 2 — known WP/news boilerplate blocks
+  try { $(BOILERPLATE_SELECTORS).remove() } catch { /* malformed selector guard */ }
+
+  // Pass 3 — ad-pattern class/id (must run before attribute stripping)
+  $('[class], [id]').each((_, el) => {
+    const cls = $(el).attr('class') ?? ''
+    const id  = $(el).attr('id')  ?? ''
+    if (AD_PATTERN.test(cls) || AD_PATTERN.test(id)) $(el).remove()
+  })
+
+  // Pass 4 — iframe allowlist
+  $('iframe, embed, object').each((_, el) => {
+    const src = $(el).attr('src') ?? $(el).attr('data-src') ?? $(el).attr('data') ?? ''
     try {
       const host = new URL(src).hostname.replace(/^www\./, '')
       if (!ALLOWED_IFRAME_HOSTS.some(d => host === d || host.endsWith('.' + d))) $(el).remove()
     } catch { $(el).remove() }
   })
-  $('[class], [id]').each((_, el) => {
-    const cls = $(el).attr('class') ?? ''
-    const id  = $(el).attr('id') ?? ''
-    if (AD_PATTERN.test(cls) || AD_PATTERN.test(id)) $(el).remove()
+
+  // Pass 5 — promote lazy-loaded images (data-src / data-lazy-src → src)
+  $('img[data-src], img[data-lazy-src], img[data-original]').each((_, el) => {
+    const lazySrc = $(el).attr('data-src') ?? $(el).attr('data-lazy-src') ?? $(el).attr('data-original')
+    if (lazySrc) $(el).attr('src', lazySrc)
   })
-  return $('body').html() ?? ''
+
+  // Pass 6 — remove tracking pixels (1×1 images or known beacon URLs)
+  $('img').each((_, el) => {
+    const src = $(el).attr('src') ?? ''
+    const w   = parseInt($(el).attr('width')  ?? '999', 10)
+    const h   = parseInt($(el).attr('height') ?? '999', 10)
+    if (w <= 1 || h <= 1 || /\/(pixel|beacon|track|stat|analytics|impression)\//i.test(src)) {
+      $(el).remove()
+    }
+  })
+
+  // Pass 7 — strip noisy attributes from all elements
+  $('*').each((_, el) => {
+    const attribs: Record<string, string> = (el as any).attribs ?? {}
+    const tag = ((el as any).tagName ?? '').toLowerCase()
+    const toRemove: string[] = []
+
+    for (const attr of Object.keys(attribs)) {
+      if (attr.startsWith('on')) { toRemove.push(attr); continue }               // event handlers
+      if (attr === 'style') { toRemove.push(attr); continue }                    // inline style noise
+      if (attr.startsWith('data-') && attr !== 'data-src') { toRemove.push(attr); continue }
+    }
+    toRemove.forEach(a => $(el).removeAttr(a))
+
+    // img: strip rendering hints & let target site handle responsive sizing
+    if (tag === 'img') {
+      $(el).removeAttr('srcset').removeAttr('sizes').removeAttr('loading')
+           .removeAttr('decoding').removeAttr('fetchpriority')
+           .removeAttr('width').removeAttr('height').removeAttr('class').removeAttr('id')
+    }
+    // a: keep only href, strip trackers
+    if (tag === 'a') {
+      const href = $(el).attr('href') ?? ''
+      Object.keys((el as any).attribs ?? {}).forEach(a => $(el).removeAttr(a))
+      if (href && !href.startsWith('javascript:')) $(el).attr('href', href)
+    }
+    // generic: strip class/id from non-semantic structural tags
+    if (['div', 'span', 'section', 'article', 'aside', 'header', 'footer', 'nav', 'main'].includes(tag)) {
+      $(el).removeAttr('class').removeAttr('id')
+    }
+  })
+
+  // Pass 8 — remove empty block elements (bottom-up, two sweeps is enough)
+  const BLOCK = 'p, div, section, article, aside, li, blockquote'
+  for (let i = 0; i < 2; i++) {
+    $(BLOCK).each((_, el) => {
+      if (!$(el).text().trim() && $(el).find('img, iframe, video, audio').length === 0) {
+        $(el).remove()
+      }
+    })
+  }
+
+  let out = $('body').html() ?? ''
+
+  // Pass 9 — collapse 3+ consecutive <br> down to 2
+  out = out.replace(/(\s*<br\s*\/?>\s*){3,}/gi, '<br><br>')
+
+  // Pass 10 — strip WP block comments and shortcodes
+  out = out.replace(/<!--\s*\/?wp:[^>]*-->/gi, '')
+  out = out.replace(/\[[a-z_-]+[^\]]*\]/gi, '')          // [gallery], [caption id=...], etc.
+  out = out.replace(/&nbsp;(\s*&nbsp;)+/g, ' ')           // repeated &nbsp; runs
+
+  return out.trim()
 }
 
 export interface FetchJobData { sourceId: string }
@@ -57,10 +166,43 @@ async function fetchRss(endpoint: string, auth?: { username: string; password: s
     if (!res.ok) throw new Error(`RSS fetch responded ${res.status}`)
     const xml = await res.text()
     const feed = await rss.parseString(xml)
-    return feed.items.map(mapRssItem)
+    return feed.items.slice(0, MAX_PER_FETCH).map(mapRssItem)
   }
   const feed = await rss.parseURL(endpoint)
-  return feed.items.map(mapRssItem)
+  return feed.items.slice(0, MAX_PER_FETCH).map(mapRssItem)
+}
+
+function extractRssImage(item: any): string | null {
+  // 1. enclosure (podcast-style)
+  if (item.enclosure?.url && item.enclosure.url.match(/\.(jpe?g|png|webp|gif|avif)/i)) return item.enclosure.url
+  // 2. media:content
+  const mc = item['media:content']
+  if (mc) {
+    const url = mc?.$ ?.url ?? mc?.url ?? (Array.isArray(mc) ? mc[0]?.$ ?.url : null)
+    if (url) return url
+  }
+  // 3. media:thumbnail
+  const mt = item['media:thumbnail']
+  if (mt) {
+    const url = mt?.$ ?.url ?? mt?.url ?? (Array.isArray(mt) ? mt[0]?.$ ?.url : null)
+    if (url) return url
+  }
+  // 4. media:group > media:content
+  const mg = item['media:group']
+  if (mg) {
+    const inner = mg['media:content'] ?? mg['media:thumbnail']
+    if (inner) {
+      const url = inner?.$ ?.url ?? inner?.url ?? (Array.isArray(inner) ? inner[0]?.$ ?.url : null)
+      if (url) return url
+    }
+  }
+  // 5. first <img> in content HTML
+  const html = item.content ?? item.summary ?? ''
+  if (html) {
+    const m = html.match(/<img[^>]+src=["']([^"']+)["']/i)
+    if (m?.[1] && !m[1].startsWith('data:')) return m[1]
+  }
+  return null
 }
 
 function mapRssItem(item: any) {
@@ -69,7 +211,7 @@ function mapRssItem(item: any) {
     title:       item.title ?? '',
     content:     cleanContent(item.content ?? item.summary ?? ''),
     excerpt:     item.contentSnippet?.slice(0, 300) ?? '',
-    imageUrl:    item.enclosure?.url ?? null,
+    imageUrl:    extractRssImage(item),
     originalUrl: item.link ?? null,
     author:      item.creator ?? null,
     categories:  item.categories ?? [],
@@ -80,39 +222,43 @@ async function fetchWpApi(endpoint: string, auth?: { username: string; password:
   const headers: Record<string, string> = {}
   if (auth) headers['Authorization'] = basicAuthHeader(auth.username, auth.password)
 
-  const res = await fetch(
-    endpoint + '?per_page=20&_fields=id,title,content,excerpt,link,author,date,categories',
-    { headers, signal: AbortSignal.timeout(15000) },
-  )
+  const url = new URL(endpoint)
+  url.searchParams.set('per_page', String(MAX_PER_FETCH))
+  const res = await fetch(url.toString(), { headers, signal: AbortSignal.timeout(20000) })
   if (!res.ok) throw new Error(`WP API responded ${res.status}`)
   const posts = await res.json() as Array<Record<string, any>>
 
-  const catIds = [...new Set(posts.flatMap(p => p.categories ?? []))] as number[]
-  let catMap: Record<number, string> = {}
-  if (catIds.length) {
-    try {
-      const base = endpoint.replace('/wp-json/wp/v2/posts', '')
-      const catRes = await fetch(
-        `${base}/wp-json/wp/v2/categories?include=${catIds.join(',')}&per_page=100`,
-        { headers, signal: AbortSignal.timeout(10000) },
-      )
-      if (catRes.ok) {
-        const cats = await catRes.json() as Array<{ id: number; name: string }>
-        catMap = Object.fromEntries(cats.map(c => [c.id, c.name]))
-      }
-    } catch { /* non-fatal */ }
-  }
+  return posts.map((p) => {
+    const embedded = p._embedded ?? {}
 
-  return posts.map((p) => ({
-    remoteId:    String(p.id),
-    title:       p.title?.rendered ?? '',
-    content:     cleanContent(p.content?.rendered ?? ''),
-    excerpt:     p.excerpt?.rendered?.replace(/<[^>]+>/g, '').slice(0, 300) ?? '',
-    imageUrl:    null,
-    originalUrl: p.link ?? null,
-    author:      null,
-    categories:  (p.categories ?? []).map((id: number) => catMap[id]).filter(Boolean) as string[],
-  }))
+    // Featured image from _embedded['wp:featuredmedia']
+    const featuredMedia = embedded['wp:featuredmedia']?.[0]
+    const imageUrl: string | null =
+      featuredMedia?.source_url
+      ?? featuredMedia?.media_details?.sizes?.medium_large?.source_url
+      ?? featuredMedia?.media_details?.sizes?.medium?.source_url
+      ?? featuredMedia?.media_details?.sizes?.full?.source_url
+      ?? null
+
+    // Category names from _embedded['wp:term']
+    const termGroups: Array<Array<{ taxonomy: string; name: string }>> = embedded['wp:term'] ?? []
+    const categories = termGroups
+      .flat()
+      .filter(t => t.taxonomy === 'category')
+      .map(t => t.name)
+      .filter(Boolean)
+
+    return {
+      remoteId:    String(p.id),
+      title:       p.title?.rendered ?? '',
+      content:     cleanContent(p.content?.rendered ?? ''),
+      excerpt:     p.excerpt?.rendered?.replace(/<[^>]+>/g, '').slice(0, 300) ?? '',
+      imageUrl,
+      originalUrl: p.link ?? null,
+      author:      (embedded['author']?.[0]?.name as string | undefined) ?? null,
+      categories,
+    }
+  })
 }
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
@@ -158,13 +304,20 @@ async function fetchArticleContent(
   url: string,
   dispatcher?: ProxyAgent,
   ua?: string,
-): Promise<{ content: string; excerpt: string }> {
+): Promise<{ content: string; excerpt: string; imageUrl: string | null }> {
   try {
     const headers = { 'User-Agent': ua ?? CF_UA, 'Accept': 'text/html, */*' }
     const fetched = await fetchWithFallback(url, headers, dispatcher)
-    if (!fetched.ok || !fetched.text) return { content: '', excerpt: '' }
+    if (!fetched.ok || !fetched.text) return { content: '', excerpt: '', imageUrl: null }
     const html = fetched.text
     const $ = cheerio.load(html)
+
+    // Try to extract featured image from og:image or twitter:image meta tags first
+    let featuredImageUrl: string | null =
+      $('meta[property="og:image"]').attr('content')
+      ?? $('meta[name="twitter:image"]').attr('content')
+      ?? $('meta[name="twitter:image:src"]').attr('content')
+      ?? null
 
     const selectors = [
       '.a-full-content', '.all-content',
@@ -185,17 +338,29 @@ async function fetchArticleContent(
       const $body = $('body')
       $body.find('script, style, noscript, nav, header, footer, aside, .sidebar, .menu, .comments').remove()
       const text = $body.text().trim().slice(0, 10000)
-      return { content: '', excerpt: text.slice(0, 300) }
+      return { content: '', excerpt: text.slice(0, 300), imageUrl: featuredImageUrl }
     }
 
-    // Strip the featured image (first <img>) from content to avoid duplication with imageUrl field
-    contentEl.find('img').first().remove()
+    // Capture the featured image from the first <img> before removing it
+    const firstImg = contentEl.find('img').first()
+    if (!featuredImageUrl && firstImg.length) {
+      const src = firstImg.attr('data-src') ?? firstImg.attr('src') ?? ''
+      if (src && !src.startsWith('data:')) {
+        try {
+          // Convert relative to absolute
+          featuredImageUrl = src.startsWith('http') ? src : new URL(src, url).href
+        } catch { /* ignore */ }
+      }
+    }
+
+    // Strip the featured image from content to avoid duplication
+    firstImg.remove()
 
     const html_content = contentEl.html() ?? ''
     const text = contentEl.text().trim()
-    return { content: cleanContent(html_content), excerpt: text.slice(0, 300) }
+    return { content: cleanContent(html_content), excerpt: text.slice(0, 300), imageUrl: featuredImageUrl }
   } catch {
-    return { content: '', excerpt: '' }
+    return { content: '', excerpt: '', imageUrl: null }
   }
 }
 
@@ -223,6 +388,7 @@ async function fetchCustomApi(source: {
   const maxPerCat = 1
 
   for (const { id, name } of categoryMappings) {
+    if (results.length >= MAX_PER_FETCH) break
     let page = 1
     let catCount = 0
     while (true) {
@@ -242,7 +408,7 @@ async function fetchCustomApi(source: {
       if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
 
       for (const item of items) {
-        if (catCount >= maxPerCat) break
+        if (catCount >= maxPerCat || results.length >= MAX_PER_FETCH) break
         const resolved = item as Record<string, unknown>
         if (isHtml && typeof resolved.url === 'string' && resolved.url.startsWith('/') && baseUrl) {
           resolved.url = baseUrl + resolved.url
@@ -253,12 +419,20 @@ async function fetchCustomApi(source: {
 
         let content = String(get('content', 'content') ?? '')
         let excerpt = String(get('excerpt', 'excerpt') ?? '')
+        let imageUrl = (get('imageUrl', 'image') as string | null) ?? null
+
+        // Fix relative image URLs from listing (e.g. Mediadesk HTML)
+        if (imageUrl && !imageUrl.startsWith('http') && baseUrl) {
+          try { imageUrl = new URL(imageUrl, baseUrl).href } catch { /* keep as-is */ }
+        }
 
         if (isHtml && !content && typeof resolved.url === 'string' && resolved.url) {
           if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
           const scraped = await fetchArticleContent(resolved.url, dispatcher, ua)
           content = scraped.content
           if (!excerpt) excerpt = scraped.excerpt
+          // Use scraped image if the listing didn't provide one
+          if (!imageUrl && scraped.imageUrl) imageUrl = scraped.imageUrl
         }
 
         results.push({
@@ -266,7 +440,7 @@ async function fetchCustomApi(source: {
           title:       String(get('title', 'title') ?? ''),
           content:     cleanContent(content),
           excerpt:     excerpt.slice(0, 300),
-          imageUrl:    (get('imageUrl', 'image') as string | null) ?? null,
+          imageUrl,
           originalUrl: (get('originalUrl', 'url') as string | null) ?? null,
           author:      (get('author', 'author') as string | null) ?? null,
           categories:  [name],
@@ -330,7 +504,7 @@ async function setCachedItems(sourceId: string, interval: string | null, items: 
   } catch { /* non-fatal */ }
 }
 
-async function processSource(sourceId: string): Promise<{ fetched: number; newPosts: number }> {
+async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise<{ fetched: number; newPosts: number }> {
   const source = await db.source.findUniqueOrThrow({ where: { id: sourceId } })
 
   let auth: { username: string; password: string } | undefined
@@ -348,15 +522,30 @@ async function processSource(sourceId: string): Promise<{ fetched: number; newPo
         : await fetchCustomApi(source)
   )
   if (!cached) await setCachedItems(sourceId, source.interval, items)
+  await job?.updateProgress({ pct: 10, phase: 'fetched', total: items.length })
 
   const blocklist = await getBlocklist()
   let newPosts = 0
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]
+    const pct = Math.round(10 + (i / Math.max(items.length, 1)) * 85)
+    await job?.updateProgress({ pct, phase: 'processing', current: i + 1, total: items.length })
     const hash = createHash('sha256')
       .update(source.id + item.remoteId + item.title)
       .digest('hex')
     const existing = await db.aggregatedPost.findUnique({ where: { hash } })
-    if (existing) continue
+    if (existing) {
+      if (!existing.imageUrl && item.imageUrl) {
+        const slug = slugify(existing.title) || existing.id
+        uploadImageFromUrl(item.imageUrl, slug)
+          .then(s3Url => {
+            const url = s3Url ?? item.imageUrl!
+            db.aggregatedPost.update({ where: { id: existing.id }, data: { imageUrl: url } }).catch(() => {})
+          })
+          .catch(() => db.aggregatedPost.update({ where: { id: existing.id }, data: { imageUrl: item.imageUrl! } }).catch(() => {}))
+      }
+      continue
+    }
 
     const blocked = isBlocked(item.title, item.content, blocklist)
     const created = await db.aggregatedPost.create({
@@ -376,6 +565,17 @@ async function processSource(sourceId: string): Promise<{ fetched: number; newPo
 
     await summarizeQueue.add('summarize', { postId: created.id }, { attempts: 2, backoff: { type: 'fixed', delay: 5000 } })
     fireWebhook({ id: created.id, title: created.title, originalUrl: created.originalUrl, createdAt: created.createdAt }).catch(() => {})
+
+    // Upload image to S3/R2 in background; update DB when done
+    if (created.imageUrl) {
+      const slug = slugify(created.title) || created.id
+      uploadImageFromUrl(created.imageUrl, slug)
+        .then(s3Url => {
+          if (s3Url) db.aggregatedPost.update({ where: { id: created.id }, data: { imageUrl: s3Url } }).catch(() => {})
+        })
+        .catch(() => {})
+    }
+
     newPosts++
   }
 
@@ -416,7 +616,7 @@ export function startFetchWorker() {
       })
       const start = Date.now()
       try {
-        const { fetched, newPosts } = await processSource(sourceId)
+        const { fetched, newPosts } = await processSource(sourceId, job)
         await db.fetchJob.update({
           where: { id: jobRecord.id },
           data: { status: 'OK', fetched, newPosts, duration: Date.now() - start },

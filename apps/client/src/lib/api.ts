@@ -57,8 +57,9 @@ export const postsApi = {
 }
 
 export const dashboardApi = {
-  stats:  () => api.get('/dashboard/stats').then(r => r.data),
-  queues: () => api.get('/dashboard/queues').then(r => r.data),
+  stats:    () => api.get('/dashboard/stats').then(r => r.data),
+  queues:   () => api.get('/dashboard/queues').then(r => r.data),
+  trending: () => api.get('/dashboard/trending').then(r => r.data),
 }
 
 export const settingsApi = {
@@ -109,6 +110,14 @@ export const apiKeysApi = {
   list:   () => api.get('/api-keys').then(r => r.data),
   create: (name: string) => api.post('/api-keys', { name }).then(r => r.data),
   remove: (id: string) => api.delete(`/api-keys/${id}`),
+}
+
+export const pipelinesApi = {
+  list:   ()                    => api.get('/pipelines').then(r => r.data),
+  create: (d: any)              => api.post('/pipelines', d).then(r => r.data),
+  update: (id: string, d: any)  => api.patch(`/pipelines/${id}`, d).then(r => r.data),
+  remove: (id: string)          => api.delete(`/pipelines/${id}`),
+  run:    (id: string)          => api.post(`/pipelines/${id}/run`).then(r => r.data),
 }
 
 export const usersApi = {

@@ -193,6 +193,25 @@ enum TaskStatus {
   FAILED
 }
 
+model Pipeline {
+  id              String   @id @default(cuid())
+  name            String
+  enabled         Boolean  @default(true)
+  // Source filter: null = all sources; otherwise JSON array of sourceIds or tag strings
+  sourceFilter    Json?
+  qualityMin      Int      @default(0)
+  autoPublish     Boolean  @default(false)
+  siteIds         String[] @default([])
+  defaultStatus   String   @default("publish")
+  // Cron expression, e.g. "0 8 * * *" = every day at 08:00
+  schedule        String?
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([enabled])
+}
+
 model AuditLog {
   id           String   @id @default(cuid())
   userId       String?

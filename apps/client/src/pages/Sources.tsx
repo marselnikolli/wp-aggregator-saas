@@ -317,7 +317,9 @@ function AddSourceDialog({ open, onClose }: { open: boolean; onClose: () => void
               <>
                 <Label>Endpoint URL</Label>
                 <div className="flex gap-2">
-                  <Input placeholder="https://example.com/feed" value={form.endpoint}
+                  <Input
+                    placeholder={form.type === 'WP_API' ? 'https://example.com/wp-json/wp/v2/posts?_embed' : 'https://example.com/feed'}
+                    value={form.endpoint}
                     onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
                   <DetectButton url={form.endpoint} onDetect={handleDetect} />
                 </div>
@@ -456,7 +458,10 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
               <>
                 <Label>Endpoint URL</Label>
                 <div className="flex gap-2">
-                  <Input value={form.endpoint} onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
+                  <Input
+                    placeholder={form.type === 'WP_API' ? 'https://example.com/wp-json/wp/v2/posts?_embed' : 'https://example.com/feed'}
+                    value={form.endpoint}
+                    onChange={e => setForm(p => ({ ...p, endpoint: e.target.value }))} />
                   <DetectButton url={form.endpoint} onDetect={handleDetect} />
                 </div>
               </>
@@ -716,6 +721,7 @@ export function Sources() {
   const [perPage, setPerPage] = useState(20)
   const [tagFilter, setTagFilter] = useState('')
   const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
+  const [fetchPct, setFetchPct] = useState<Record<string, number>>({})
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -745,18 +751,24 @@ export function Sources() {
             if (!line) continue
             try {
               const ev = JSON.parse(line.slice(5).trim()) as {
-                type: 'job:active' | 'job:completed' | 'job:failed'
+                type: 'job:active' | 'job:completed' | 'job:failed' | 'job:progress'
                 sourceId: string
+                progress?: { pct: number; phase: string; current?: number; total?: number }
               }
-              const status = ev.type === 'job:active' ? 'active' : ev.type === 'job:completed' ? 'completed' : 'failed'
-              setActiveJobs(prev => ({ ...prev, [ev.sourceId]: status }))
-              if (status !== 'active') {
-                qc.invalidateQueries({ queryKey: ['sources'] })
-                setTimeout(() => setActiveJobs(prev => {
-                  const next = { ...prev }
-                  delete next[ev.sourceId]
-                  return next
-                }), 3000)
+              if (ev.type === 'job:progress') {
+                setFetchPct(prev => ({ ...prev, [ev.sourceId]: ev.progress?.pct ?? 0 }))
+              } else {
+                const status = ev.type === 'job:active' ? 'active' : ev.type === 'job:completed' ? 'completed' : 'failed'
+                setActiveJobs(prev => ({ ...prev, [ev.sourceId]: status }))
+                if (ev.type === 'job:active') setFetchPct(prev => ({ ...prev, [ev.sourceId]: 0 }))
+                if (status !== 'active') {
+                  setFetchPct(prev => ({ ...prev, [ev.sourceId]: 100 }))
+                  qc.invalidateQueries({ queryKey: ['sources'] })
+                  setTimeout(() => {
+                    setActiveJobs(prev => { const n = { ...prev }; delete n[ev.sourceId]; return n })
+                    setFetchPct(prev => { const n = { ...prev }; delete n[ev.sourceId]; return n })
+                  }, 3000)
+                }
               }
             } catch { /* malformed SSE line */ }
           }
@@ -912,6 +924,14 @@ export function Sources() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
+                    {activeJobs[src.id] === 'active' && (
+                      <div className="w-24 h-1.5 rounded-full bg-secondary overflow-hidden">
+                        <div
+                          className="h-full bg-primary rounded-full transition-all duration-500"
+                          style={{ width: `${fetchPct[src.id] ?? 0}%` }}
+                        />
+                      </div>
+                    )}
                     <Badge variant={src.fetchStatus === 'OK' ? 'success' : src.fetchStatus === 'ERROR' ? 'destructive' : 'secondary'}>
                       {src.fetchStatus}
                     </Badge>

@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { RichTextEditor } from '@/components/RichTextEditor'
 
 const TABS     = ['PENDING', 'APPROVED', 'REJECTED'] as const
 const PER_PAGE = [10, 25, 50, 100] as const
@@ -600,9 +601,11 @@ export function Posts() {
               </div>
             )}
             {editMode ? (
-              <textarea value={draft.content} onChange={e => setDraft(p => ({ ...p, content: e.target.value }))}
-                className="w-full min-h-[300px] rounded-md border border-border bg-secondary/50 px-3 py-2 text-xs font-mono resize-y focus:outline-none focus:ring-1 focus:ring-ring"
-                placeholder="HTML content" />
+              <RichTextEditor
+                value={draft.content ?? ''}
+                onChange={html => setDraft(p => ({ ...p, content: html }))}
+                placeholder="Write content…"
+              />
             ) : (
               <div
                 className={[

@@ -1,90 +1,74 @@
-# WP Aggregator SaaS — Todo
+# WP Aggregator SaaS — Backlog
 
-## Source Management
-- [x] Optional credentials for WP REST API sources (public endpoints work without auth)
-- [x] Custom API source type with field mapping (e.g. meshume.php?j=60&id=4&p= style endpoints) - for each website that matches this API source it will be needed to map each ID number with the category name
-- [x] RSS auto-detection (enter domain URL, auto-probe /feed, /rss, /feed.xml, /atom.xml)
-- [x] Bulk import sources from text file (one URL per line, domain-only URLs supported)
-- [x] Per-source fetch interval (each source can have its own cron: every 15min, 1h, 6h, daily)
-- [x] Source health dashboard (success rate, avg fetch time, error history)
-- [x] Source categories/tags for organisation
-- [x] Source-level category mapping (map remote categories to local WP categories per target site)
-- [x] Detect and handle paginated sources (fetch multiple pages per run — implemented for CUSTOM_API)
-- [x] Source deduplication (warn if same domain added twice under different paths)
-- [x] Sources page pagination
-- [x] Preview pane featured image
+## Legend
+> Skill tags indicate which superpowers skill to invoke before starting the task.
 
-## Custom CMS Support (oranews.tv-style)
-- [x] CUSTOM_API source type with configurable endpoint template and field mapping
-- [x] Field mapper UI: point to JSON paths for title, content, excerpt, image, date, url, id
-- [x] Pagination config: param name, starting value, increment
-- [x] Cloudflare bypass strategy: configurable User-Agent, cookie jar, optional proxy
-- [x] Auto-detect if endpoint returns JSON array vs wrapped object (e.g. {data: [...]} vs [...])
-- [x] Support for multiple category IDs per source (fetch ?id=1, ?id=2, etc.)
+---
 
-## AI Intelligence Layer
-- [x] OpenAI / Claude / Gemini summarization worker (actually call APIs — field exists but unused)
-- [x] AI title rewriting (make titles SEO-friendly, fix all-caps Albanian news titles)
-- [x] Auto language detection (langdetect or franc.js)
-- [x] AI-powered translation (Albanian → other languages or vice versa)
-- [x] Auto keyword/tag extraction (feed into WP tags on publish)
-- [x] AI content categorisation (suggest WP category based on content)
-- [x] Quality scoring engine: readability score + length + image presence + source trust score
-- [x] Semantic duplicate detection (embedding similarity, not just hash)
-- [x] AI-generated excerpt if original is missing or too short
+## [ ] Featured image: download locally & rename by post title-slug
+**Skill:** `incremental-implementation`
 
-## Automation Pipeline
-- [x] Fully automated pipeline mode: fetch → AI enrich → score → auto-approve if score ≥ N → publish
-- [x] Per-source automation config (some sources trusted/auto-approved, others need review)
-- [x] Auto-reject rules: block posts matching keyword list, below quality threshold
-- [x] Scheduled publishing: publish at specific times (e.g. every morning at 08:00)
-- [x] Round-robin publishing (spread posts across sites evenly)
-- [x] Publish to multiple sites simultaneously with per-site category/tag overrides
+- At fetch time: slugify `post.title` → `my-post-title.jpg`
+- Download image bytes, upload to S3/R2 using the slug as filename (override SHA-256 naming in `lib/image-storage.ts`)
+- Update `AggregatedPost.imageUrl` to the public CDN URL
+- Files: `workers/fetcher.ts` → `lib/image-storage.ts` (add `filename` param) → `workers/publisher.ts`
 
-## Publishing
-- [x] Featured image download + re-upload to target WP media library before publishing
-- [x] WP category auto-creation on target site if category doesn't exist
-- [x] WP tag sync (create tags from extracted keywords)
-- [x] Post status control (publish immediately vs draft vs scheduled)
-- [x] Per-site publish settings: default category, default author, post format
-- [x] Republish / update already-published post if source updated
+---
 
-## UI / UX
-- [x] Inline post preview panel (always-visible static pane with featured image)
-- [x] Bulk select + approve / reject / delete posts
-- [x] Post content editor (edit title, excerpt, content before publishing)
-- [x] Post search + advanced filters (source, category, date range)
-- [x] Real-time fetch progress via SSE (per-source on Sources page)
-- [x] Queue status panel (BullMQ job counts in sidebar)
-- [x] Keyboard shortcuts (j/k navigate, a approve, r reject, e edit, Esc cancel)
-- [x] Ad stripping from fetched content (keep social/video embeds)
-- [x] Source drag-and-drop reordering
-- [x] Mobile-responsive layout pass
+## [ ] Post editor in view pane: full rich-text editor
+**Skill:** `brainstorming` → `react-expert`
 
-## Infrastructure & Performance
-- [x] Separate worker process (split from API server, run as own container)
-- [x] BullBoard job queue dashboard (visual inspection of queues)
-- [x] Per-source rate limiting (respect robots.txt + min delay between requests)
-- [x] Redis-based distributed lock (prevent duplicate fetches if worker restarts mid-job)
-- [x] S3/R2 image storage (store downloaded images in object storage, not just URL reference)
-- [x] Caching layer (cache fetched feeds for N minutes, avoid hammering sources)
-- [x] DB query optimisation (add composite indexes for common filter combos)
-- [x] Prometheus metrics endpoint + Grafana dashboard
-- [x] Sentry error tracking integration
+- Replace the plain `<textarea>` in the preview/edit pane with TipTap (headless, Tailwind-compatible)
+- Toolbar: bold, italic, underline, headings (H2/H3), bullet list, ordered list, link, image
+- Output: raw HTML stored in `content` field (same format as current)
+- File: `client/src/pages/Posts.tsx` (editor section of the preview pane)
 
-## Security & Auth
-- [x] Role-based access control (admin / editor / viewer)
-- [x] API key management (generate API keys for external integrations)
-- [x] Audit log (who approved/rejected/published what, and when)
-- [x] 2FA (TOTP)
-- [x] Session management (view + revoke active sessions)
-- [x] IP allowlist for API access
+---
 
-## Settings & Config
-- [x] Working AI provider settings (save/load keys, test connection)
-- [x] Global auto-fetch toggle + default interval
-- [x] Default publishing pipeline config
-- [x] Notification preferences (email on fetch error, daily digest)
-- [x] Webhook outbound (POST to external URL on new post / publish event)
-- [x] Export all data (sources, posts, settings) to JSON
-- [x] Import/restore from export
+## [ ] Dashboard: "Trending" posts section
+**Skill:** `feature-forge` → `similarity-search-patterns`
+
+- New `GET /dashboard/trending` endpoint
+- Cluster posts by: `semanticDupOf` chains, or title Jaccard similarity (≥ 0.6), or same-day same-source keyword overlap
+- Rank clusters by size; return top 10 topics with representative title + count
+- Frontend: card on `Dashboard.tsx` below stats grid — topic chips with count badges
+- Files: `routes/dashboard.ts` → `client/src/pages/Dashboard.tsx`
+
+---
+
+## [ ] Progress bar during fetch
+**Skill:** `react-expert` + `incremental-implementation`
+
+- Backend: call `job.updateProgress(n / total * 100)` inside the per-item loop in `workers/fetcher.ts`
+- Expose progress on existing SSE stream (`GET /sources/:id/fetch` SSE endpoint)
+- Frontend: animated linear progress bar per source card while fetch is active; disappears on completion
+- Files: `workers/fetcher.ts` → `routes/sources.ts` → `client/src/pages/Sources.tsx`
+
+---
+
+## [ ] Limit to last 10–15 posts per source fetch
+**Skill:** `incremental-implementation`
+
+- `fetchWpApi`: `url.searchParams.set('per_page', '15')` (currently 20)
+- `fetchRss`: set `maxItems: 15` in rss-parser options
+- `fetchCustomApi`: break after collecting 15 items across all category IDs
+- Consider adding a `maxPostsPerFetch` field to the Source model for per-source override
+
+---
+
+## [ ] Multiple automation pipelines
+**Skill:** `feature-forge` → `spec-driven-development`
+
+- New `Pipeline` Prisma model: `{ id, name, enabled, sourceFilter (tag/type/sourceId[]), qualityMin, autoPublish, siteIds[], schedule (cron string), defaultStatus }`
+- Replace single global pipeline config (`pipeline_default_*` settings) with a list of named pipelines
+- Each pipeline runs independently as a BullMQ repeatable job
+- UI: new `/pipelines` page with create/edit/delete/enable toggle
+- Files: `prisma/schema.prisma` → `routes/pipelines.ts` → `workers/pipelineRunner.ts` → `client/src/pages/Pipelines.tsx`
+
+---
+
+## [x] HTML content cleanup on import
+**Done** — 10-pass cheerio pipeline in `workers/fetcher.ts → cleanContent()`:
+scripts/styles/forms, WP boilerplate blocks, ad-pattern class/id, iframe allowlist,
+lazy-image promotion, tracking pixel removal, attribute stripping (on*, style, data-*),
+empty block removal, br collapse, WP block comments & shortcodes.

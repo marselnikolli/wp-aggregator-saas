@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users } from 'lucide-react'
+import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users, GitBranch } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
@@ -12,6 +12,7 @@ const nav = [
   { to: '/sites',     label: 'Sites',     icon: Globe           },
   { to: '/sources',   label: 'Sources',   icon: Rss             },
   { to: '/posts',     label: 'Posts',     icon: FileText        },
+  { to: '/pipelines', label: 'Pipelines', icon: GitBranch       },
   { to: '/settings',  label: 'Settings',  icon: Settings        },
   { to: '/audit-log', label: 'Audit Log', icon: ShieldCheck     },
   { to: '/team',      label: 'Team',      icon: Users           },

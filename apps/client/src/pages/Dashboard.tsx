@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Globe, Rss, Clock, CheckCircle, AlertCircle, Loader2 } from 'lucide-react'
+import { Globe, Rss, Clock, CheckCircle, AlertCircle, Loader2, TrendingUp } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { dashboardApi } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -36,6 +36,12 @@ export function Dashboard() {
     refetchInterval: 30_000,
   })
 
+  const { data: trendingData } = useQuery({
+    queryKey: ['dashboard-trending'],
+    queryFn: dashboardApi.trending,
+    refetchInterval: 60_000,
+  })
+
   if (isLoading) return (
     <div className="space-y-6">
       <div>
@@ -63,6 +69,30 @@ export function Dashboard() {
         <StatCard title="Pending Review"  value={data?.pending ?? 0}   icon={Clock}       description="Awaiting approval" />
         <StatCard title="Published"       value={data?.published ?? 0} icon={CheckCircle} description="Total posts pushed" />
       </div>
+
+      {/* Trending topics */}
+      {trendingData?.trending?.length > 0 && (
+        <Card>
+          <CardHeader className="flex flex-row items-center gap-2 pb-3">
+            <TrendingUp className="h-4 w-4 text-primary" />
+            <CardTitle className="text-base">Trending Topics</CardTitle>
+            <span className="text-xs text-muted-foreground ml-auto">Last 7 days · same story across sources</span>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {trendingData.trending.map((topic: { id: string; title: string; count: number }) => (
+                <div key={topic.id}
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-secondary/50 px-3 py-1 text-sm">
+                  <span className="truncate max-w-[260px]">{topic.title}</span>
+                  <span className="rounded-full bg-primary/20 text-primary text-xs font-semibold px-1.5 py-0.5">
+                    ×{topic.count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Recent fetch jobs */}
       <Card>
