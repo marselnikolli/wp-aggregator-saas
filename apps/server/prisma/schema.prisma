@@ -38,6 +38,7 @@ model Site {
   url             String
   apiUser         String
   apiPassword     String
+  jwtToken        String?
   enabled         Boolean       @default(true)
   defaultCategory String?
   defaultAuthorId Int?

@@ -21,11 +21,13 @@ api.interceptors.response.use(
 
 // Typed helpers
 export const sitesApi = {
-  list:   ()         => api.get('/sites').then(r => r.data),
-  create: (d: any)   => api.post('/sites', d).then(r => r.data),
-  update: (id: string, d: any) => api.patch(`/sites/${id}`, d).then(r => r.data),
-  remove: (id: string) => api.delete(`/sites/${id}`),
-  test:   (id: string) => api.post(`/sites/${id}/test`).then(r => r.data),
+  list:     ()         => api.get('/sites').then(r => r.data),
+  create:   (d: any)   => api.post('/sites', d).then(r => r.data),
+  update:   (id: string, d: any) => api.patch(`/sites/${id}`, d).then(r => r.data),
+  remove:   (id: string) => api.delete(`/sites/${id}`),
+  test:     (id: string) => api.post(`/sites/${id}/test`).then(r => r.data),
+  fetchJwt: (id: string) => api.post(`/sites/${id}/fetch-jwt`).then(r => r.data),
+  clearJwt: (id: string) => api.delete(`/sites/${id}/jwt`),
 }
 
 export const sourcesApi = {

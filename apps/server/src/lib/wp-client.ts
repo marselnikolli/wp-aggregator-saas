@@ -19,14 +19,36 @@ interface WPMediaPayload {
 }
 
 export class WPClient {
-  private base: string
-  private auth: string
+  private base:    string
+  private siteUrl: string
+  private auth:    string
   private categoryCache = new Map<string, number>()
   private tagCache      = new Map<string, number>()
 
-  constructor(siteUrl: string, user: string, password: string) {
-    this.base = siteUrl.replace(/\/$/, '') + '/wp-json/wp/v2'
-    this.auth = 'Basic ' + Buffer.from(`${user}:${password}`).toString('base64')
+  constructor(siteUrl: string, user: string, password: string, jwtToken?: string | null) {
+    this.siteUrl = siteUrl.replace(/\/$/, '')
+    this.base    = this.siteUrl + '/wp-json/wp/v2'
+    this.auth    = jwtToken
+      ? `Bearer ${jwtToken}`
+      : 'Basic ' + Buffer.from(`${user}:${password}`).toString('base64')
+  }
+
+  static async fetchJwtToken(siteUrl: string, user: string, password: string): Promise<string> {
+    const base = siteUrl.replace(/\/$/, '')
+    const res = await fetch(`${base}/wp-json/jwt-auth/v1/token`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ username: user, password }),
+      signal:  AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`JWT auth failed ${res.status}: ${err}`)
+    }
+    const data = await res.json() as { token?: string; data?: { token?: string } }
+    const token = data.token ?? data.data?.token
+    if (!token) throw new Error('JWT response did not contain a token')
+    return token
   }
 
   async createPost(payload: WPPostPayload): Promise<{ id: number; link: string }> {

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2, TestTube, Globe, Loader2, Pencil } from 'lucide-react'
+import { Plus, Trash2, TestTube, Globe, Loader2, Pencil, KeyRound, ShieldCheck, ShieldOff } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { sitesApi } from '@/lib/api'
@@ -175,6 +175,17 @@ export function Sites() {
     onError: () => toast.error('Connection failed'),
   })
 
+  const fetchJwt = useMutation({
+    mutationFn: (id: string) => sitesApi.fetchJwt(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sites'] }); toast.success('JWT token fetched and saved') },
+    onError: (e: any) => toast.error(e.response?.data?.error ?? 'Failed to fetch JWT token'),
+  })
+
+  const clearJwt = useMutation({
+    mutationFn: (id: string) => sitesApi.clearJwt(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['sites'] }); toast.success('JWT token cleared') },
+  })
+
   return (
     <div className="space-y-6 p-6 h-full overflow-y-auto">
       <div className="flex items-center justify-between">
@@ -222,6 +233,10 @@ export function Sites() {
                   <Badge variant={site.enabled ? 'success' : 'secondary'}>
                     {site.enabled ? 'Active' : 'Disabled'}
                   </Badge>
+                  {site.hasJwt
+                    ? <Badge variant="outline" className="text-emerald-400 border-emerald-500/30 gap-1"><ShieldCheck className="h-3 w-3" />JWT</Badge>
+                    : <Badge variant="outline" className="text-muted-foreground gap-1"><ShieldOff className="h-3 w-3" />Basic</Badge>
+                  }
                   <Switch
                     checked={site.enabled}
                     onCheckedChange={(enabled) => toggle.mutate({ id: site.id, enabled })}
@@ -233,6 +248,14 @@ export function Sites() {
                   <Button size="sm" variant="outline" onClick={() => test.mutate(site.id)} disabled={test.isPending}>
                     {test.isPending ? <Loader2 className="animate-spin" /> : <TestTube />}
                     Test
+                  </Button>
+                  <Button size="sm" variant="outline"
+                    className={site.hasJwt ? 'text-muted-foreground' : 'text-amber-400 border-amber-500/30 hover:bg-amber-500/10'}
+                    onClick={() => site.hasJwt ? clearJwt.mutate(site.id) : fetchJwt.mutate(site.id)}
+                    disabled={fetchJwt.isPending || clearJwt.isPending}
+                    title={site.hasJwt ? 'Clear JWT token (revert to Basic auth)' : 'Fetch JWT token using stored credentials'}>
+                    {(fetchJwt.isPending || clearJwt.isPending) ? <Loader2 className="animate-spin" /> : <KeyRound className="h-3.5 w-3.5" />}
+                    {site.hasJwt ? 'Clear JWT' : 'Fetch JWT'}
                   </Button>
                   <Button size="icon" variant="ghost" onClick={() => remove.mutate(site.id)}
                     className="text-muted-foreground hover:text-destructive">

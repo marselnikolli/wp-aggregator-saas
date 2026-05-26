@@ -48,7 +48,7 @@ async function runPublishTask(taskId: string) {
     where:   { id: taskId },
     include: {
       post: { include: { source: { select: { categoryMap: true } } } },
-      site: { select: { id: true, url: true, apiUser: true, apiPassword: true, defaultCategory: true, defaultAuthorId: true } },
+      site: { select: { id: true, url: true, apiUser: true, apiPassword: true, jwtToken: true, defaultCategory: true, defaultAuthorId: true } },
     },
   })
 
@@ -57,10 +57,12 @@ async function runPublishTask(taskId: string) {
     data: { status: 'PROCESSING', attempts: { increment: 1 } },
   })
 
+  const jwtToken = task.site.jwtToken ? decrypt(task.site.jwtToken) : undefined
   const client = new WPClient(
     task.site.url,
     task.site.apiUser,
     decrypt(task.site.apiPassword),
+    jwtToken,
   )
 
   let featuredMediaId: number | undefined

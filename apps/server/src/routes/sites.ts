@@ -7,7 +7,7 @@ import { WPClient } from '../lib/wp-client.js'
 const SITE_SELECT = {
   id: true, name: true, url: true, apiUser: true, enabled: true,
   defaultCategory: true, defaultAuthorId: true,
-  lastPublished: true, createdAt: true,
+  lastPublished: true, createdAt: true, jwtToken: true,
 } as const
 
 const siteBody = z.object({
@@ -22,7 +22,9 @@ const siteBody = z.object({
 
 export async function sitesRoutes(app: FastifyInstance) {
   app.get('/sites', { preHandler: [app.authenticate] }, async () => {
-    return db.site.findMany({ orderBy: { createdAt: 'desc' }, select: SITE_SELECT })
+    const sites = await db.site.findMany({ orderBy: { createdAt: 'desc' }, select: SITE_SELECT })
+    // Never expose the raw token — replace with a boolean indicator
+    return sites.map(({ jwtToken, ...s }) => ({ ...s, hasJwt: !!jwtToken }))
   })
 
   app.post('/sites', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -53,9 +55,31 @@ export async function sitesRoutes(app: FastifyInstance) {
     const { id } = req.params as { id: string }
     const { decrypt } = await import('../lib/crypto.js')
     const site = await db.site.findUniqueOrThrow({ where: { id } })
-    const client = new WPClient(site.url, site.apiUser, decrypt(site.apiPassword))
+    const jwtToken = site.jwtToken ? decrypt(site.jwtToken) : undefined
+    const client = new WPClient(site.url, site.apiUser, decrypt(site.apiPassword), jwtToken)
     const ok = await client.testConnection()
     return { ok }
+  })
+
+  // Fetch a JWT token from the WP site using stored credentials and persist it
+  app.post('/sites/:id/fetch-jwt', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const { decrypt, encrypt } = await import('../lib/crypto.js')
+    const site = await db.site.findUniqueOrThrow({ where: { id } })
+    try {
+      const token = await WPClient.fetchJwtToken(site.url, site.apiUser, decrypt(site.apiPassword))
+      await db.site.update({ where: { id }, data: { jwtToken: encrypt(token) } })
+      return { ok: true }
+    } catch (err) {
+      return reply.code(400).send({ error: (err as Error).message })
+    }
+  })
+
+  // Clear stored JWT token for a site
+  app.delete('/sites/:id/jwt', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    await db.site.update({ where: { id }, data: { jwtToken: null } })
+    return reply.code(204).send()
   })
 
   // Proxy WP categories — cached 10 min in Redis
@@ -69,7 +93,8 @@ export async function sitesRoutes(app: FastifyInstance) {
     if (cached) return JSON.parse(cached)
 
     const site = await db.site.findUniqueOrThrow({ where: { id } })
-    const client = new WPClient(site.url, site.apiUser, decrypt(site.apiPassword))
+    const jwtToken = site.jwtToken ? decrypt(site.jwtToken) : undefined
+    const client = new WPClient(site.url, site.apiUser, decrypt(site.apiPassword), jwtToken)
     const cats = await client.getCategories()
     await redis.set(cacheKey, JSON.stringify(cats), 'EX', 600)
     return cats
