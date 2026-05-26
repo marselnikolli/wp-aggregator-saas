@@ -6,7 +6,7 @@ import { encrypt, decrypt } from '../lib/crypto.js'
 import { applyScheduledPublishSettings } from '../workers/schedPublisher.js'
 import { testStorageConnection } from '../lib/image-storage.js'
 
-const ENCRYPTED = new Set(['openai_key', 'anthropic_key', 's3_secret_key', 's3_access_key'])
+const ENCRYPTED = new Set(['openai_key', 'anthropic_key', 's3_secret_key', 's3_access_key', 'unsplash_api_key'])
 
 async function getSetting(key: string): Promise<string | null> {
   const row = await db.setting.findUnique({ where: { key } })
@@ -302,6 +302,37 @@ export async function settingsRoutes(app: FastifyInstance) {
       ops.push(setSetting('notif_email',        body.notifications.email))
     }
     await Promise.all(ops)
+    reply.code(204).send()
+  })
+
+  // Unsplash API key
+  app.get('/settings/unsplash-key', { onRequest: [app.authenticate] }, async () => {
+    const row = await db.setting.findUnique({ where: { key: 'unsplash_api_key' } })
+    return { isSet: !!row }
+  })
+  app.post('/settings/unsplash-key', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const { key } = z.object({ key: z.string().min(1) }).parse(req.body)
+    await setSetting('unsplash_api_key', key)
+    reply.code(204).send()
+  })
+  app.delete('/settings/unsplash-key', { onRequest: [app.authenticate] }, async (_req, reply) => {
+    await db.setting.deleteMany({ where: { key: 'unsplash_api_key' } })
+    reply.code(204).send()
+  })
+
+  // RSS feed token
+  app.get('/settings/feed-token', { onRequest: [app.authenticate] }, async () => {
+    const row = await db.setting.findUnique({ where: { key: 'feed_token' } })
+    return { token: row?.value ?? null }
+  })
+  app.post('/settings/feed-token', { onRequest: [app.authenticate] }, async () => {
+    const { randomUUID } = await import('crypto')
+    const token = randomUUID().replace(/-/g, '')
+    await setSetting('feed_token', token)
+    return { token }
+  })
+  app.delete('/settings/feed-token', { onRequest: [app.authenticate] }, async (_req, reply) => {
+    await db.setting.deleteMany({ where: { key: 'feed_token' } })
     reply.code(204).send()
   })
 

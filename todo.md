@@ -138,7 +138,7 @@ Show what was published, where, when, and a link to the live WP post.
 
 ---
 
-## [ ] Source health view
+## [x] Source health view
 
 Surface per-source quality metrics to help identify and prune bad sources.
 
@@ -151,7 +151,7 @@ Surface per-source quality metrics to help identify and prune bad sources.
 
 ---
 
-## [ ] Featured image fallback via Unsplash
+## [x] Featured image fallback via Unsplash
 
 When a post has no `imageUrl` after fetch, search Unsplash for a relevant image.
 
@@ -161,7 +161,7 @@ When a post has no `imageUrl` after fetch, search Unsplash for a relevant image.
 
 ---
 
-## [ ] Scheduled publish spread
+## [x] Scheduled publish spread
 
 Spread pipeline posts evenly across a time window instead of all at once.
 
@@ -173,7 +173,7 @@ Spread pipeline posts evenly across a time window instead of all at once.
 
 ---
 
-## [ ] RSS output of published posts
+## [x] RSS output of published posts
 
 Expose published posts as a subscribable feed.
 

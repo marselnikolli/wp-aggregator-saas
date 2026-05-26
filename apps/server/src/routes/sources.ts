@@ -414,12 +414,23 @@ export async function sourcesRoutes(app: FastifyInstance) {
   app.get('/sources/:id/health', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
 
-    const jobs = await db.fetchJob.findMany({
-      where:   { sourceId: id },
-      orderBy: { createdAt: 'desc' },
-      take:    50,
-      select:  { id: true, status: true, fetched: true, newPosts: true, duration: true, error: true, createdAt: true },
-    })
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    const [jobs, postAgg, dupCount, posts7d] = await Promise.all([
+      db.fetchJob.findMany({
+        where:   { sourceId: id },
+        orderBy: { createdAt: 'desc' },
+        take:    50,
+        select:  { id: true, status: true, fetched: true, newPosts: true, duration: true, error: true, createdAt: true },
+      }),
+      db.aggregatedPost.aggregate({
+        where: { sourceId: id },
+        _avg:  { qualityScore: true },
+        _count: { id: true },
+      }),
+      db.aggregatedPost.count({ where: { sourceId: id, semanticDupOf: { not: null } } }),
+      db.aggregatedPost.count({ where: { sourceId: id, createdAt: { gte: sevenDaysAgo } } }),
+    ])
 
     const total   = jobs.length
     const success = jobs.filter(j => j.status === 'OK').length
@@ -427,6 +438,7 @@ export async function sourcesRoutes(app: FastifyInstance) {
     const avgDuration = durations.length
       ? Math.round(durations.reduce((a, b) => a + b, 0) / durations.length)
       : null
+    const totalPosts = postAgg._count.id
 
     return {
       totalJobs:    total,
@@ -434,6 +446,10 @@ export async function sourcesRoutes(app: FastifyInstance) {
       successRate:  total ? Math.round((success / total) * 100) : null,
       avgDuration,
       recentJobs:   jobs.slice(0, 20),
+      avgQuality:   postAgg._avg.qualityScore !== null ? Math.round(postAgg._avg.qualityScore ?? 0) : null,
+      dupRate:      totalPosts > 0 ? Math.round((dupCount / totalPosts) * 100) : 0,
+      posts7d,
+      totalPosts,
     }
   })
 }

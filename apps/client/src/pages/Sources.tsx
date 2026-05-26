@@ -702,6 +702,43 @@ function ImportDialog({ open, onClose }: { open: boolean; onClose: () => void })
   )
 }
 
+function SourceHealthInline({ sourceId, expanded }: { sourceId: string; expanded: boolean }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['source-health', sourceId],
+    queryFn:  () => sourcesApi.health(sourceId),
+    enabled:  expanded,
+  })
+
+  if (!expanded) return null
+  if (isLoading) return (
+    <div className="px-4 pb-3 pt-1 flex items-center gap-2 text-xs text-muted-foreground">
+      <Loader2 className="h-3 w-3 animate-spin" /> Loading health…
+    </div>
+  )
+  if (!data) return null
+
+  return (
+    <div className="px-4 pb-3 border-t border-border/50 mt-0 pt-3 grid grid-cols-4 gap-3">
+      <div className="text-center">
+        <p className="text-sm font-semibold">{data.successRate !== null ? `${data.successRate}%` : '—'}</p>
+        <p className="text-xs text-muted-foreground">Fetch success</p>
+      </div>
+      <div className="text-center">
+        <p className="text-sm font-semibold">{data.avgQuality !== null ? data.avgQuality : '—'}</p>
+        <p className="text-xs text-muted-foreground">Avg quality</p>
+      </div>
+      <div className="text-center">
+        <p className="text-sm font-semibold">{data.dupRate !== undefined ? `${data.dupRate}%` : '—'}</p>
+        <p className="text-xs text-muted-foreground">Dup rate</p>
+      </div>
+      <div className="text-center">
+        <p className="text-sm font-semibold">{data.posts7d ?? '—'}</p>
+        <p className="text-xs text-muted-foreground">Posts 7d</p>
+      </div>
+    </div>
+  )
+}
+
 export function Sources() {
   const [open, setOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
@@ -712,6 +749,7 @@ export function Sources() {
   const [tagFilter, setTagFilter] = useState('')
   const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
   const [fetchPct, setFetchPct] = useState<Record<string, number>>({})
+  const [expandedHealth, setExpandedHealth] = useState<Record<string, boolean>>({})
   const qc = useQueryClient()
 
   useEffect(() => {
@@ -929,8 +967,10 @@ export function Sources() {
                       checked={src.enabled}
                       onCheckedChange={(enabled) => toggle.mutate({ id: src.id, enabled })}
                     />
-                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground"
-                      onClick={() => setHealthTarget(src)} title="Health">
+                    <Button size="icon" variant="ghost"
+                      className={`h-8 w-8 ${expandedHealth[src.id] ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`}
+                      onClick={() => setExpandedHealth(p => ({ ...p, [src.id]: !p[src.id] }))}
+                      title={expandedHealth[src.id] ? 'Hide health stats' : 'Show health stats'}>
                       <Activity className="h-3.5 w-3.5" />
                     </Button>
                     <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground"
@@ -955,6 +995,7 @@ export function Sources() {
                     </Button>
                   </div>
                 </CardContent>
+                <SourceHealthInline sourceId={src.id} expanded={!!expandedHealth[src.id]} />
               </Card>
             ))}
           </div>

@@ -20,45 +20,101 @@ export async function dashboardRoutes(app: FastifyInstance) {
   })
 
   app.get('/dashboard/trending', { preHandler: [app.authenticate] }, async () => {
-    // Find posts that share a semanticDupOf chain (same story, different sources)
-    // plus posts with nearly identical titles within the last 7 days
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-    // Cluster by semanticDupOf: group posts where semanticDupOf points to the same root
+    type Cluster = {
+      title: string; count: number; latestAt: Date
+      imageUrl: string | null; originalUrl: string | null; sources: string[]
+    }
+    const clusters = new Map<string, Cluster>()
+
+    // Tier 1: semantic dup clusters (high confidence — embedding-level match)
     const duped = await db.aggregatedPost.findMany({
       where: { semanticDupOf: { not: null }, createdAt: { gte: since } },
-      select: { id: true, title: true, semanticDupOf: true, sourceId: true, createdAt: true },
+      select: { id: true, title: true, semanticDupOf: true, sourceId: true,
+                createdAt: true, imageUrl: true, originalUrl: true,
+                source: { select: { name: true } } },
       orderBy: { createdAt: 'desc' },
     })
-
-    // Also find the root posts that were referenced
     const rootIds = [...new Set(duped.map(p => p.semanticDupOf!))]
     const roots = rootIds.length ? await db.aggregatedPost.findMany({
       where: { id: { in: rootIds } },
-      select: { id: true, title: true, sourceId: true, createdAt: true },
+      select: { id: true, title: true, sourceId: true, createdAt: true,
+                imageUrl: true, originalUrl: true, source: { select: { name: true } } },
     }) : []
 
-    // Build cluster map: rootId → { title, count, latestAt }
-    const clusters = new Map<string, { title: string; count: number; latestAt: Date }>()
     for (const root of roots) {
-      clusters.set(root.id, { title: root.title, count: 1, latestAt: root.createdAt })
+      clusters.set(root.id, {
+        title: root.title, count: 1, latestAt: root.createdAt,
+        imageUrl: root.imageUrl, originalUrl: root.originalUrl,
+        sources: root.source ? [root.source.name] : [],
+      })
     }
     for (const p of duped) {
       const rootId = p.semanticDupOf!
       const c = clusters.get(rootId)
+      const name = p.source?.name ?? ''
       if (c) {
         c.count++
         if (p.createdAt > c.latestAt) c.latestAt = p.createdAt
+        if (!c.imageUrl && p.imageUrl) c.imageUrl = p.imageUrl
+        if (name && !c.sources.includes(name)) c.sources.push(name)
       } else {
-        clusters.set(rootId, { title: p.title, count: 2, latestAt: p.createdAt })
+        clusters.set(rootId, {
+          title: p.title, count: 2, latestAt: p.createdAt,
+          imageUrl: p.imageUrl, originalUrl: p.originalUrl,
+          sources: name ? [name] : [],
+        })
+      }
+    }
+
+    // Tier 2: keyword fingerprint grouping (catches stories before semantic dedup runs)
+    const STOPWORDS = new Set(['that','this','have','from','with','will','been','were','they',
+      'their','there','when','what','about','which','these','those','into','your','more',
+      'also','some','than','then','well','after','before'])
+    const titleKey = (t: string) =>
+      t.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+       .filter(w => w.length >= 5 && !STOPWORDS.has(w))
+       .sort().slice(0, 6).join('|')
+
+    const recent = await db.aggregatedPost.findMany({
+      where: { semanticDupOf: null, createdAt: { gte: since } },
+      select: { id: true, title: true, sourceId: true, createdAt: true,
+                imageUrl: true, originalUrl: true, source: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+      take: 500,
+    })
+    const groups = new Map<string, typeof recent>()
+    for (const post of recent) {
+      const key = titleKey(post.title)
+      if (!key || key.split('|').length < 2) continue
+      const g = groups.get(key) ?? []
+      g.push(post)
+      groups.set(key, g)
+    }
+    for (const [key, group] of groups) {
+      if (group.length < 2) continue
+      const distinctSources = new Set(group.map(p => p.sourceId))
+      if (distinctSources.size < 2) continue
+      const latest = group.reduce((a, b) => a.createdAt > b.createdAt ? a : b)
+      const id = `kw:${key}`
+      if (!clusters.has(id)) {
+        clusters.set(id, {
+          title: latest.title,
+          count: distinctSources.size,
+          latestAt: latest.createdAt,
+          imageUrl: group.find(p => p.imageUrl)?.imageUrl ?? null,
+          originalUrl: latest.originalUrl,
+          sources: [...new Set(group.map(p => p.source?.name).filter((n): n is string => !!n))],
+        })
       }
     }
 
     const trending = [...clusters.entries()]
-      .map(([id, c]) => ({ id, ...c }))
+      .map(([id, c]) => ({ id, ...c, sources: c.sources.slice(0, 5) }))
       .filter(c => c.count >= 2)
       .sort((a, b) => b.count - a.count || b.latestAt.getTime() - a.latestAt.getTime())
-      .slice(0, 10)
+      .slice(0, 12)
 
     return { trending }
   })

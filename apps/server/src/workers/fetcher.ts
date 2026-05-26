@@ -11,6 +11,7 @@ import { unwrapResponse, resolveDotPath, tryParseBody } from '../lib/customApi.j
 import { summarizeQueue } from './summarizer.js'
 import { uploadImageFromUrl, slugify } from '../lib/image-storage.js'
 import { franc } from 'franc'
+import { getSettingValue } from '../routes/settings.js'
 
 const rss = new Parser({
   timeout: 10000,
@@ -504,6 +505,23 @@ async function setCachedItems(sourceId: string, interval: string | null, items: 
   } catch { /* non-fatal */ }
 }
 
+async function tryUnsplashFallback(postId: string, title: string): Promise<void> {
+  const key = await getSettingValue('unsplash_api_key')
+  if (!key) return
+  const query = encodeURIComponent(title.replace(/<[^>]+>/g, '').slice(0, 80))
+  const res = await fetch(`https://api.unsplash.com/search/photos?query=${query}&per_page=1&orientation=landscape`, {
+    headers: { Authorization: `Client-ID ${key}` },
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) return
+  const data = await res.json() as { results: Array<{ urls: { regular: string } }> }
+  const url = data.results[0]?.urls?.regular
+  if (!url) return
+  const slug = slugify(title) || postId
+  const storedUrl = await uploadImageFromUrl(url, slug).catch(() => null)
+  await db.aggregatedPost.update({ where: { id: postId }, data: { imageUrl: storedUrl ?? url } })
+}
+
 async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise<{ fetched: number; newPosts: number }> {
   const source = await db.source.findUniqueOrThrow({ where: { id: sourceId } })
 
@@ -574,6 +592,8 @@ async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise
           if (s3Url) db.aggregatedPost.update({ where: { id: created.id }, data: { imageUrl: s3Url } }).catch(() => {})
         })
         .catch(() => {})
+    } else {
+      tryUnsplashFallback(created.id, created.title).catch(() => {})
     }
 
     newPosts++

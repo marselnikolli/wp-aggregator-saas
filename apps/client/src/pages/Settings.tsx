@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download, Monitor, ShieldCheck, Languages, Globe, HardDrive } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download, Monitor, ShieldCheck, Languages, Globe, HardDrive, Image, Rss, Copy, RefreshCw } from 'lucide-react'
 import { settingsApi, sitesApi, authApi } from '@/lib/api'
 import { Switch } from '@/components/ui/switch'
 
@@ -296,6 +296,28 @@ export function Settings() {
     mutationFn: (provider: 'openai' | 'anthropic') => settingsApi.removeAiKey(provider),
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['settings'] }); toast.success('Key removed') },
     onError:    () => toast.error('Failed to remove key'),
+  })
+
+  const { data: unsplashData, refetch: refetchUnsplash } = useQuery({ queryKey: ['unsplash-key'], queryFn: settingsApi.getUnsplashKey })
+  const [unsplashInput, setUnsplashInput] = useState('')
+  const saveUnsplashKey = useMutation({
+    mutationFn: (key: string) => settingsApi.saveUnsplashKey(key),
+    onSuccess: () => { refetchUnsplash(); setUnsplashInput(''); toast.success('Unsplash key saved') },
+    onError: () => toast.error('Failed to save key'),
+  })
+  const removeUnsplashKey = useMutation({
+    mutationFn: settingsApi.removeUnsplashKey,
+    onSuccess: () => { refetchUnsplash(); toast.success('Unsplash key removed') },
+  })
+
+  const { data: feedData, refetch: refetchFeed } = useQuery({ queryKey: ['feed-token'], queryFn: settingsApi.getFeedToken })
+  const regenFeedToken = useMutation({
+    mutationFn: settingsApi.regenerateFeedToken,
+    onSuccess: () => refetchFeed(),
+  })
+  const revokeFeedToken = useMutation({
+    mutationFn: settingsApi.revokeFeedToken,
+    onSuccess: () => { refetchFeed(); toast.success('Feed token revoked') },
   })
 
   const intervalValue = fetchInterval !== '' ? fetchInterval : (settings?.fetchInterval ?? 60)
@@ -847,6 +869,86 @@ export function Settings() {
               {setupTotp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <ShieldCheck className="h-3.5 w-3.5 mr-1.5" />}
               Set up 2FA
             </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Image className="h-4 w-4" />Unsplash Image Fallback</CardTitle>
+          <CardDescription>When a post has no featured image, search Unsplash automatically</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="grid gap-1.5">
+            <Label>Unsplash Access Key</Label>
+            <div className="flex gap-2">
+              <Input
+                type="password"
+                placeholder={unsplashData?.isSet ? '••••••••  (enter new key to replace)' : 'Your Unsplash Access Key'}
+                value={unsplashInput}
+                onChange={e => setUnsplashInput(e.target.value)}
+                className="font-mono text-sm"
+              />
+              <Button size="sm" disabled={!unsplashInput.trim() || saveUnsplashKey.isPending}
+                onClick={() => saveUnsplashKey.mutate(unsplashInput.trim())}>
+                {saveUnsplashKey.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Save'}
+              </Button>
+              {unsplashData?.isSet && (
+                <Button size="sm" variant="ghost" className="text-destructive px-2"
+                  onClick={() => removeUnsplashKey.mutate(undefined)}>
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Create a free app at unsplash.com/developers to get an access key.
+              {unsplashData?.isSet && <span className="text-emerald-400 ml-1">● Active</span>}
+            </p>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Separator />
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><Rss className="h-4 w-4" />RSS Feed</CardTitle>
+          <CardDescription>Subscribe to published posts via RSS — no login required</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {feedData?.token ? (
+            <>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded-md bg-secondary px-3 py-2 text-xs font-mono truncate select-all">
+                  {`${window.location.origin}/api/feed/${feedData.token}.rss`}
+                </code>
+                <Button size="sm" variant="outline" onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/api/feed/${feedData.token}.rss`)
+                  toast.success('Feed URL copied')
+                }}>
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => regenFeedToken.mutate()} disabled={regenFeedToken.isPending}>
+                  {regenFeedToken.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  Regenerate
+                </Button>
+                <Button size="sm" variant="ghost" className="text-destructive" onClick={() => revokeFeedToken.mutate()} disabled={revokeFeedToken.isPending}>
+                  Revoke
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2">
+              <p className="text-sm text-muted-foreground">No feed token yet. Generate one to enable the RSS feed.</p>
+              <Button size="sm" onClick={() => regenFeedToken.mutate()} disabled={regenFeedToken.isPending}>
+                {regenFeedToken.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Rss className="h-3.5 w-3.5" />}
+                Generate Feed Token
+              </Button>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -13,16 +13,54 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 
+function SavedField({
+  label, hint, value, onChange, placeholder,
+  savedLabel = 'Saved — click to replace',
+}: {
+  label: React.ReactNode
+  hint?: string
+  value: string
+  onChange: (v: string) => void
+  placeholder: string
+  savedLabel?: string
+}) {
+  const [editing, setEditing] = useState(false)
+  const isSaved = !editing
+
+  return (
+    <div className="grid gap-1.5">
+      <Label>{label}</Label>
+      {isSaved ? (
+        <button type="button" onClick={() => setEditing(true)}
+          className="flex items-center gap-2 h-9 w-full rounded-md border border-border bg-secondary/50 px-3 text-sm text-left hover:bg-secondary transition-colors">
+          <ShieldCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+          <span className="text-muted-foreground text-xs flex-1">{savedLabel}</span>
+        </button>
+      ) : (
+        <div className="flex gap-1.5">
+          <Input type="password" autoFocus placeholder={placeholder} value={value}
+            onChange={e => onChange(e.target.value)} className="flex-1" />
+          <button type="button" onClick={() => { onChange(''); setEditing(false) }}
+            className="shrink-0 text-xs text-muted-foreground hover:text-foreground px-2 border border-border rounded-md">
+            Cancel
+          </button>
+        </div>
+      )}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  )
+}
+
 function SiteFormFields({
   form,
   setForm,
-  passwordPlaceholder,
-  jwtPlaceholder,
+  passwordSaved,
+  jwtSaved,
 }: {
   form: Record<string, any>
   setForm: (fn: (p: any) => any) => void
-  passwordPlaceholder?: string
-  jwtPlaceholder?: string
+  passwordSaved?: boolean
+  jwtSaved?: boolean
 }) {
   return (
     <>
@@ -42,22 +80,37 @@ function SiteFormFields({
           <Input placeholder="admin" value={form.apiUser}
             onChange={e => setForm(p => ({ ...p, apiUser: e.target.value }))} />
         </div>
+        {passwordSaved ? (
+          <SavedField label="API Password"
+            savedLabel="Password saved — click to replace"
+            placeholder="New application password"
+            value={form.apiPassword}
+            onChange={v => setForm((p: any) => ({ ...p, apiPassword: v }))} />
+        ) : (
+          <div className="grid gap-1.5">
+            <Label>API Password</Label>
+            <Input type="password" placeholder="Application password" value={form.apiPassword}
+              onChange={e => setForm(p => ({ ...p, apiPassword: e.target.value }))} />
+          </div>
+        )}
+      </div>
+      {jwtSaved ? (
+        <SavedField label={<>JWT Token <span className="text-muted-foreground font-normal text-xs">(optional)</span></>}
+          savedLabel="JWT token saved — click to replace"
+          placeholder="Paste new JWT token"
+          value={form.jwtToken}
+          hint="Token saved — overrides Basic auth. Use 'Clear JWT' on the card to revert to Basic."
+          onChange={v => setForm((p: any) => ({ ...p, jwtToken: v }))} />
+      ) : (
         <div className="grid gap-1.5">
-          <Label>API Password</Label>
-          <Input type="password" placeholder={passwordPlaceholder ?? ''} value={form.apiPassword}
-            onChange={e => setForm(p => ({ ...p, apiPassword: e.target.value }))} />
+          <Label>JWT Token <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+          <Input type="password" placeholder="eyJ… (paste JWT token)" value={form.jwtToken}
+            onChange={e => setForm(p => ({ ...p, jwtToken: e.target.value }))} />
+          <p className="text-xs text-muted-foreground">
+            Paste a token, or leave blank and use "Fetch JWT" on the site card after saving.
+          </p>
         </div>
-      </div>
-      <div className="grid gap-1.5">
-        <Label>
-          JWT Token <span className="text-muted-foreground font-normal">(optional — overrides Basic auth)</span>
-        </Label>
-        <Input type="password" placeholder={jwtPlaceholder ?? 'eyJ…'} value={form.jwtToken}
-          onChange={e => setForm(p => ({ ...p, jwtToken: e.target.value }))} />
-        <p className="text-xs text-muted-foreground">
-          Paste a token from the WP JWT Auth plugin, or leave blank and use "Fetch JWT" after saving.
-        </p>
-      </div>
+      )}
       <div className="border-t border-border pt-3 grid gap-3">
         <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide">Publish defaults</p>
         <div className="grid grid-cols-2 gap-3">
@@ -102,7 +155,7 @@ function AddSiteDialog({ open, onClose }: { open: boolean; onClose: () => void }
       <DialogContent>
         <DialogHeader><DialogTitle>Add WordPress Site</DialogTitle></DialogHeader>
         <div className="grid gap-4 py-2">
-          <SiteFormFields form={form} setForm={setForm} />
+          <SiteFormFields form={form} setForm={setForm} passwordSaved={false} jwtSaved={false} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
@@ -154,8 +207,8 @@ function EditSiteDialog({ site, onClose }: { site: any; onClose: () => void }) {
         <DialogHeader><DialogTitle>Edit Site</DialogTitle></DialogHeader>
         <div className="grid gap-4 py-2">
           <SiteFormFields form={form} setForm={setForm}
-            passwordPlaceholder="Leave blank to keep"
-            jwtPlaceholder={site.hasJwt ? 'Leave blank to keep current token' : 'eyJ…'} />
+            passwordSaved={true}
+            jwtSaved={!!site.hasJwt} />
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>

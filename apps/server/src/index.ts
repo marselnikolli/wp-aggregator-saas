@@ -22,6 +22,7 @@ import { metricsRoutes } from './routes/metrics.js'
 import { usersRoutes } from './routes/users.js'
 import { apiKeysRoutes, resolveApiKey } from './routes/apiKeys.js'
 import { pipelinesRoutes } from './routes/pipelines.js'
+import { feedRoutes } from './routes/feed.js'
 import { startFetchWorker } from './workers/fetcher.js'
 import { startPublishWorker } from './workers/publisher.js'
 import { startSummarizerWorker } from './workers/summarizer.js'
@@ -125,6 +126,7 @@ async function bootstrap() {
   await app.register(apiKeysRoutes,   { prefix })
   await app.register(pipelinesRoutes, { prefix })
   await app.register(bullboardRoutes)
+  await app.register(feedRoutes)
 
   app.get('/health', () => ({ status: 'ok', ts: new Date() }))
 
