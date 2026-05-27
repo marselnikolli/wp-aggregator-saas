@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Play, Pencil, Trash2, Zap, CheckCircle, X, Languages, ArrowRight } from 'lucide-react'
+import { Plus, Play, Pencil, Trash2, Zap, CheckCircle, X, Languages, ArrowRight, Share2 } from 'lucide-react'
 import { toast } from 'sonner'
-import { pipelinesApi, sitesApi, sourcesApi } from '@/lib/api'
+import { pipelinesApi, sitesApi, sourcesApi, socialApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +36,8 @@ interface Pipeline {
   targetCategory: string | null
   publishWindowHours: number
   aiPrompt: string | null
+  socialAccountId: string | null
+  socialTemplate: string | null
 }
 
 const emptyForm = (): Omit<Pipeline, 'id'> => ({
@@ -52,7 +54,17 @@ const emptyForm = (): Omit<Pipeline, 'id'> => ({
   targetCategory: null,
   publishWindowHours: 0,
   aiPrompt: null,
+  socialAccountId: null,
+  socialTemplate: null,
 })
+
+const SOCIAL_TEMPLATES = [
+  { value: 'link_post',     label: 'Link post' },
+  { value: 'photo_comment', label: 'Photo + comment' },
+  { value: 'photo_only',    label: 'Photo only' },
+  { value: 'text_link',     label: 'Text + link' },
+  { value: 'image_overlay', label: 'Image overlay' },
+]
 
 function PipelineForm({
   initial, sites, sources, onSave, onClose,
@@ -65,6 +77,7 @@ function PipelineForm({
 }) {
   const [form, setForm] = useState(initial)
   const [catInput, setCatInput] = useState('')
+  const { data: socialAccounts = [] } = useQuery({ queryKey: ['social-accounts'], queryFn: socialApi.accounts })
 
   const toggleSite = (id: string) =>
     setForm(p => ({
@@ -191,6 +204,23 @@ function PipelineForm({
       </div>
 
       <div className="grid gap-1.5">
+        <Label>Auto-share to social <span className="text-muted-foreground text-xs">(optional)</span></Label>
+        <select value={form.socialAccountId ?? ''} onChange={e => setForm(p => ({ ...p, socialAccountId: e.target.value || null, socialTemplate: e.target.value ? (p.socialTemplate ?? 'link_post') : null }))}
+          className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+          <option value="">No social sharing</option>
+          {(socialAccounts as any[]).filter((a: any) => a.enabled).map((a: any) => (
+            <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
+          ))}
+        </select>
+        {form.socialAccountId && (
+          <select value={form.socialTemplate ?? 'link_post'} onChange={e => setForm(p => ({ ...p, socialTemplate: e.target.value }))}
+            className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+            {SOCIAL_TEMPLATES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+          </select>
+        )}
+      </div>
+
+      <div className="grid gap-1.5">
         <Label>Target sites</Label>
         <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto border border-border rounded-md p-2">
           {sites.map(site => (
@@ -311,6 +341,11 @@ export function Pipelines() {
                     )}
                     {p.aiPrompt && (
                       <Badge variant="outline" className="text-violet-400 border-violet-500/30">AI rewrite</Badge>
+                    )}
+                    {p.socialAccountId && (
+                      <Badge variant="outline" className="text-blue-400 border-blue-500/30">
+                        <Share2 className="h-2.5 w-2.5 mr-1" />{p.socialTemplate ?? 'social'}
+                      </Badge>
                     )}
                   </div>
                   {!p.schedule && (

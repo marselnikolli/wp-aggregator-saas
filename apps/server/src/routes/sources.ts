@@ -7,6 +7,7 @@ import { fetchQueue, fetchQueueEvents } from '../queue.js'
 import { encrypt } from '../lib/crypto.js'
 import { unwrapResponse, CAT_NAME_KEYS, FIELD_GUESS_MAP, tryParseBody } from '../lib/customApi.js'
 import { audit } from '../lib/audit.js'
+import { tryOgImageFallback, tryUnsplashFallback } from '../workers/fetcher.js'
 
 const INTERVAL_MS: Record<string, number> = {
   '15m': 900_000,

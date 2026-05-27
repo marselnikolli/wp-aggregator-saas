@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { db } from '../db.js'
 import { publishQueue } from '../queue.js'
+import { socialQueue } from '../workers/socialWorker.js'
 
 const pipelineSchema = z.object({
   name:               z.string().min(1).max(80),
@@ -18,6 +19,8 @@ const pipelineSchema = z.object({
   publishWindowHours: z.number().int().min(0).max(168).default(0),
   aiPrompt:           z.string().max(1000).nullable().default(null),
   sortOrder:          z.number().int().default(0),
+  socialAccountId:    z.string().nullable().default(null),
+  socialTemplate:     z.enum(['photo_comment', 'link_post', 'photo_only', 'text_link', 'image_overlay']).nullable().default(null),
 })
 
 export async function pipelinesRoutes(app: FastifyInstance) {
@@ -27,7 +30,7 @@ export async function pipelinesRoutes(app: FastifyInstance) {
 
   app.post('/pipelines', { onRequest: [app.authenticate] }, async (req) => {
     const data = pipelineSchema.parse(req.body)
-    return db.pipeline.create({ data: { ...data, sourceFilter: data.sourceFilter ?? undefined, translateTo: data.translateTo ?? undefined, targetCategory: data.targetCategory ?? undefined, aiPrompt: data.aiPrompt ?? undefined } })
+    return db.pipeline.create({ data: { ...data, sourceFilter: data.sourceFilter ?? undefined, translateTo: data.translateTo ?? undefined, targetCategory: data.targetCategory ?? undefined, aiPrompt: data.aiPrompt ?? undefined, socialAccountId: data.socialAccountId ?? undefined, socialTemplate: data.socialTemplate ?? undefined } })
   })
 
   app.patch('/pipelines/:id', { onRequest: [app.authenticate] }, async (req) => {
@@ -37,10 +40,12 @@ export async function pipelinesRoutes(app: FastifyInstance) {
       where: { id },
       data: {
         ...data,
-        sourceFilter:   data.sourceFilter   === null ? undefined : data.sourceFilter,
-        translateTo:    data.translateTo    ?? undefined,
-        targetCategory: data.targetCategory ?? undefined,
-        aiPrompt:       data.aiPrompt       ?? undefined,
+        sourceFilter:    data.sourceFilter   === null ? undefined : data.sourceFilter,
+        translateTo:     data.translateTo    ?? undefined,
+        targetCategory:  data.targetCategory ?? undefined,
+        aiPrompt:        data.aiPrompt       ?? undefined,
+        socialAccountId: data.socialAccountId ?? undefined,
+        socialTemplate:  data.socialTemplate  ?? undefined,
       },
     })
   })
@@ -94,6 +99,23 @@ export async function pipelinesRoutes(app: FastifyInstance) {
           publishTaskId: task.id,
           aiPrompt: pipeline.aiPrompt ?? undefined,
         }, delay ? { delay } : undefined)
+
+        if (pipeline.socialAccountId && pipeline.socialTemplate) {
+          const account = await db.socialAccount.findUnique({ where: { id: pipeline.socialAccountId } })
+          if (account) {
+            const socialPost = await db.socialPost.create({
+              data: {
+                postId:    post.id,
+                accountId: pipeline.socialAccountId,
+                platform:  account.platform,
+                template:  pipeline.socialTemplate,
+                status:    'PENDING',
+              },
+            })
+            await socialQueue.add('post', { socialPostId: socialPost.id }, delay ? { delay: delay + 5000 } : undefined)
+          }
+        }
+
         queued++
         taskIndex++
       }

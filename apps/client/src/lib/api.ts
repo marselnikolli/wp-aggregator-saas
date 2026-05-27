@@ -71,6 +71,7 @@ export const dashboardApi = {
 
 export const settingsApi = {
   get:        () => api.get('/settings').then(r => r.data),
+  save:       (d: Record<string, string>) => api.post('/settings', d),
   saveAiKeys: (d: { openaiKey?: string; anthropicKey?: string }) =>
     api.post('/settings/ai-keys', d),
   saveSchedule: (fetchInterval: number) =>
@@ -139,6 +140,13 @@ export const usersApi = {
   create: (d: any) => api.post('/users', d).then(r => r.data),
   update: (id: string, d: any) => api.patch(`/users/${id}`, d).then(r => r.data),
   remove: (id: string) => api.delete(`/users/${id}`),
+}
+
+export const captionTemplatesApi = {
+  list:   () => api.get('/caption-templates').then(r => r.data),
+  create: (data: any) => api.post('/caption-templates', data).then(r => r.data),
+  update: (id: string, data: any) => api.patch(`/caption-templates/${id}`, data).then(r => r.data),
+  remove: (id: string) => api.delete(`/caption-templates/${id}`),
 }
 
 export const socialApi = {

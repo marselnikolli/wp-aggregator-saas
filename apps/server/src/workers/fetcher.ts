@@ -520,7 +520,7 @@ async function setCachedItems(sourceId: string, interval: string | null, items: 
   } catch { /* non-fatal */ }
 }
 
-async function tryOgImageFallback(postId: string, articleUrl: string): Promise<boolean> {
+export async function tryOgImageFallback(postId: string, articleUrl: string): Promise<boolean> {
   try {
     const res = await fetch(articleUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WPAggregator/1.0)' },
@@ -542,7 +542,7 @@ async function tryOgImageFallback(postId: string, articleUrl: string): Promise<b
   } catch { return false }
 }
 
-async function tryUnsplashFallback(postId: string, title: string): Promise<void> {
+export async function tryUnsplashFallback(postId: string, title: string): Promise<void> {
   const key = await getSettingValue('unsplash_api_key')
   if (!key) return
   const query = encodeURIComponent(title.replace(/<[^>]+>/g, '').slice(0, 80))
@@ -689,10 +689,28 @@ export function startFetchWorker() {
           where: { id: jobRecord.id },
           data: { status: 'ERROR', error, duration: Date.now() - start },
         })
-        await db.source.update({
+        const updatedSource = await db.source.update({
           where: { id: sourceId },
           data: { fetchStatus: 'ERROR', errorCount: { increment: 1 }, lastError: error.slice(0, 200) },
+          select: { id: true, name: true, errorCount: true, endpoint: true },
         })
+        // Alert webhook every 3rd consecutive failure
+        if (updatedSource.errorCount % 3 === 0) {
+          const webhookUrl = await getSettingValue('webhook_url').catch(() => null)
+          if (webhookUrl) {
+            fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                event: 'source.broken',
+                source: { id: updatedSource.id, name: updatedSource.name, endpoint: updatedSource.endpoint },
+                errorCount: updatedSource.errorCount,
+                error,
+                ts: new Date().toISOString(),
+              }),
+            }).catch(() => {})
+          }
+        }
         throw err
       } finally {
         await releaseLock(sourceId)

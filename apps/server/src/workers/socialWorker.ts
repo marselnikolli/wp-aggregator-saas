@@ -3,6 +3,7 @@ import { redisOpts } from '../queue.js'
 import { db } from '../db.js'
 import { decrypt } from '../lib/crypto.js'
 import { generateCaption } from '../lib/caption.js'
+import { generateSocialImage, uploadSocialImage } from '../lib/social-image.js'
 
 export interface SocialJobData {
   socialPostId: string
@@ -66,7 +67,7 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       if (data.error) throw new Error(data.error.message ?? 'Facebook API error')
       platformPostId = data.id
 
-    } else if (template === 'photo_only' || template === 'image_overlay') {
+    } else if (template === 'photo_only') {
       const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -75,6 +76,23 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       const data = await res.json() as any
       if (data.error) throw new Error(data.error.message ?? 'Facebook API error')
       platformPostId = data.id
+
+    } else if (template === 'image_overlay') {
+      const imgBuffer = await generateSocialImage({
+        title:          record.post.title,
+        categories:     record.post.categories,
+        imageUrl:       record.post.imageUrl ?? undefined,
+        categoryColors: captionTemplate ? (captionTemplate.categoryColors as Record<string, string> ?? {}) : {},
+      })
+      const imgUrl = await uploadSocialImage(imgBuffer, record.post.id)
+      const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: imgUrl, caption: record.post.title, access_token: token }),
+      })
+      const json = await res.json() as any
+      if (json.error) throw new Error(json.error.message)
+      platformPostId = json.id
 
     } else if (template === 'photo_comment') {
       const photoRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {

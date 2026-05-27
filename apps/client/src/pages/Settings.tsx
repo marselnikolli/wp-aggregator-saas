@@ -9,7 +9,7 @@ import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
 import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download, Monitor, ShieldCheck, Languages, Globe, HardDrive, Image, Rss, Copy, RefreshCw } from 'lucide-react'
-import { settingsApi, sitesApi, authApi } from '@/lib/api'
+import { settingsApi, sitesApi, authApi, captionTemplatesApi } from '@/lib/api'
 import { Switch } from '@/components/ui/switch'
 
 interface SettingsData {
@@ -18,6 +18,7 @@ interface SettingsData {
   fetchInterval:    number
   qualityThreshold: number
   translateTo:      string
+  category_colors?: string
 }
 
 function KeyRow({
@@ -328,6 +329,52 @@ export function Settings() {
     onSuccess: () => { refetchFeed(); toast.success('Feed token revoked') },
   })
 
+  // Caption templates
+  const { data: captionTemplates, refetch: refetchTemplates } = useQuery<any[]>({
+    queryKey: ['caption-templates'],
+    queryFn:  captionTemplatesApi.list,
+  })
+  const [showAddTemplate, setShowAddTemplate] = useState(false)
+  const [newTemplate, setNewTemplate] = useState({
+    name: '', platform: 'FACEBOOK' as 'FACEBOOK' | 'INSTAGRAM',
+    language: 'sq', includeHashtags: true, includeExcerpt: false,
+    brandingText: '', emojiStyle: 'category' as 'category' | 'none',
+  })
+  const createTemplate = useMutation({
+    mutationFn: () => captionTemplatesApi.create({ ...newTemplate, brandingText: newTemplate.brandingText || null }),
+    onSuccess: () => {
+      refetchTemplates()
+      setShowAddTemplate(false)
+      setNewTemplate({ name: '', platform: 'FACEBOOK', language: 'sq', includeHashtags: true, includeExcerpt: false, brandingText: '', emojiStyle: 'category' })
+      toast.success('Template created')
+    },
+    onError: () => toast.error('Failed to create template'),
+  })
+  const deleteTemplate = useMutation({
+    mutationFn: (id: string) => captionTemplatesApi.remove(id),
+    onSuccess: () => { refetchTemplates(); toast.success('Template deleted') },
+    onError: () => toast.error('Failed to delete template'),
+  })
+
+  // Category colors
+  const [colorRows, setColorRows] = useState<{ name: string; color: string }[] | null>(null)
+  const colorRowsValue = colorRows ?? (() => {
+    if (!settings?.category_colors) return []
+    try {
+      const map: Record<string, string> = JSON.parse(settings.category_colors)
+      return Object.entries(map).map(([name, color]) => ({ name, color }))
+    } catch { return [] }
+  })()
+  const saveColors = useMutation({
+    mutationFn: () => {
+      const map: Record<string, string> = {}
+      colorRowsValue.forEach(r => { if (r.name.trim()) map[r.name.trim()] = r.color })
+      return settingsApi.save({ category_colors: JSON.stringify(map) })
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['settings'] }); setColorRows(null); toast.success('Category colors saved') },
+    onError: () => toast.error('Failed to save colors'),
+  })
+
   const intervalValue = fetchInterval !== '' ? fetchInterval : (settings?.fetchInterval ?? 60)
 
   if (isLoading) {
@@ -347,6 +394,7 @@ export function Settings() {
             { id: 'ai', label: 'AI & Content' },
             { id: 'fetching', label: 'Sources & Fetching' },
             { id: 'publishing', label: 'Publishing' },
+            { id: 'social', label: 'Social Media' },
             { id: 'integrations', label: 'Integrations' },
             { id: 'security', label: 'Security' },
             { id: 'data', label: 'Data' },
@@ -557,6 +605,153 @@ export function Settings() {
             {saveSched.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />}
             Save Schedule
           </Button>
+        </CardContent>
+      </Card>
+
+      <div id="social" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Social Media</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Caption Templates</CardTitle>
+          <CardDescription>Reusable caption configs for Facebook and Instagram auto-posting</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {(captionTemplates ?? []).length === 0 && !showAddTemplate && (
+            <p className="text-sm text-muted-foreground">No templates yet.</p>
+          )}
+          {(captionTemplates ?? []).map((t: any) => (
+            <div key={t.id} className="flex items-center justify-between rounded-md border border-border px-3 py-2 gap-2">
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <span className="text-sm font-medium truncate">{t.name}</span>
+                <Badge variant="secondary" className="text-xs shrink-0">{t.platform}</Badge>
+                <span className="text-xs text-muted-foreground shrink-0">{t.language}</span>
+              </div>
+              <Button size="sm" variant="ghost" className="text-destructive px-2 shrink-0"
+                disabled={deleteTemplate.isPending}
+                onClick={() => deleteTemplate.mutate(t.id)}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          {showAddTemplate && (
+            <div className="rounded-md border border-border p-3 space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Name</Label>
+                  <Input placeholder="e.g. Instagram Daily" value={newTemplate.name}
+                    onChange={e => setNewTemplate(p => ({ ...p, name: e.target.value }))} className="text-sm" />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Platform</Label>
+                  <select
+                    value={newTemplate.platform}
+                    onChange={e => setNewTemplate(p => ({ ...p, platform: e.target.value as 'FACEBOOK' | 'INSTAGRAM' }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm">
+                    <option value="FACEBOOK">Facebook</option>
+                    <option value="INSTAGRAM">Instagram</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Language</Label>
+                  <select
+                    value={newTemplate.language}
+                    onChange={e => setNewTemplate(p => ({ ...p, language: e.target.value }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm">
+                    <option value="sq">Albanian (sq)</option>
+                    <option value="en">English (en)</option>
+                  </select>
+                </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs">Emoji style</Label>
+                  <select
+                    value={newTemplate.emojiStyle}
+                    onChange={e => setNewTemplate(p => ({ ...p, emojiStyle: e.target.value as 'category' | 'none' }))}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm">
+                    <option value="category">Category</option>
+                    <option value="none">None</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid gap-1.5">
+                <Label className="text-xs">Branding text <span className="text-muted-foreground">(optional)</span></Label>
+                <Input placeholder="e.g. Follow us @handle" value={newTemplate.brandingText}
+                  onChange={e => setNewTemplate(p => ({ ...p, brandingText: e.target.value }))} className="text-sm" />
+              </div>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={newTemplate.includeHashtags}
+                    onChange={e => setNewTemplate(p => ({ ...p, includeHashtags: e.target.checked }))} />
+                  <span className="text-sm">Include hashtags</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={newTemplate.includeExcerpt}
+                    onChange={e => setNewTemplate(p => ({ ...p, includeExcerpt: e.target.checked }))} />
+                  <span className="text-sm">Include excerpt</span>
+                </label>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" disabled={!newTemplate.name.trim() || createTemplate.isPending}
+                  onClick={() => createTemplate.mutate()}>
+                  {createTemplate.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+                  Create
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowAddTemplate(false)}>Cancel</Button>
+              </div>
+            </div>
+          )}
+          {!showAddTemplate && (
+            <Button size="sm" variant="outline" onClick={() => setShowAddTemplate(true)}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />Add template
+            </Button>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Category Colors</CardTitle>
+          <CardDescription>Map category names to hex colors for Instagram image gradient backgrounds</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {colorRowsValue.length === 0 && (
+            <p className="text-sm text-muted-foreground">No color mappings yet.</p>
+          )}
+          {colorRowsValue.map((row, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <Input
+                placeholder="Category name"
+                value={row.name}
+                onChange={e => setColorRows(colorRowsValue.map((r, j) => j === i ? { ...r, name: e.target.value } : r))}
+                className="text-sm flex-1"
+              />
+              <input
+                type="color"
+                value={row.color || '#000000'}
+                onChange={e => setColorRows(colorRowsValue.map((r, j) => j === i ? { ...r, color: e.target.value } : r))}
+                className="h-9 w-12 rounded-md border border-input cursor-pointer p-1"
+              />
+              <Button size="sm" variant="ghost" className="text-destructive px-2"
+                onClick={() => setColorRows(colorRowsValue.filter((_, j) => j !== i))}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline"
+              onClick={() => setColorRows([...colorRowsValue, { name: '', color: '#6366f1' }])}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />Add color
+            </Button>
+            <Button size="sm" disabled={saveColors.isPending || colorRows === null}
+              onClick={() => saveColors.mutate()}>
+              {saveColors.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+              Save
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

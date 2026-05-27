@@ -25,6 +25,7 @@ import { pipelinesRoutes } from './routes/pipelines.js'
 import { feedRoutes } from './routes/feed.js'
 import { socialAccountsRoutes } from './routes/socialAccounts.js'
 import { socialRoutes } from './routes/social.js'
+import { captionTemplatesRoutes } from './routes/captionTemplates.js'
 import { startFetchWorker } from './workers/fetcher.js'
 import { startPublishWorker } from './workers/publisher.js'
 import { startSummarizerWorker } from './workers/summarizer.js'
@@ -128,8 +129,9 @@ async function bootstrap() {
   await app.register(usersRoutes,     { prefix })
   await app.register(apiKeysRoutes,   { prefix })
   await app.register(pipelinesRoutes,      { prefix })
-  await app.register(socialAccountsRoutes, { prefix })
-  await app.register(socialRoutes,         { prefix })
+  await app.register(socialAccountsRoutes,    { prefix })
+  await app.register(socialRoutes,            { prefix })
+  await app.register(captionTemplatesRoutes,  { prefix })
   await app.register(bullboardRoutes)
   await app.register(feedRoutes)
 

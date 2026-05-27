@@ -29,12 +29,13 @@ export async function getSettingValue(key: string): Promise<string | null> {
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/settings', { onRequest: [app.authenticate] }, async () => {
-    const [openai, anthropic, interval, threshold, translateTo] = await Promise.all([
+    const [openai, anthropic, interval, threshold, translateTo, categoryColors] = await Promise.all([
       db.setting.findUnique({ where: { key: 'openai_key' } }),
       db.setting.findUnique({ where: { key: 'anthropic_key' } }),
       db.setting.findUnique({ where: { key: 'fetch_interval' } }),
       db.setting.findUnique({ where: { key: 'quality_threshold' } }),
       db.setting.findUnique({ where: { key: 'translate_to' } }),
+      db.setting.findUnique({ where: { key: 'category_colors' } }),
     ])
     return {
       openaiKeySet:     !!openai,
@@ -42,6 +43,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       fetchInterval:    interval  ? Number(interval.value)  : 60,
       qualityThreshold: threshold ? Number(threshold.value) : 0,
       translateTo:      translateTo?.value ?? '',
+      category_colors:  categoryColors?.value ?? null,
     }
   })
 
@@ -341,6 +343,12 @@ export async function settingsRoutes(app: FastifyInstance) {
   })
   app.delete('/settings/feed-token', { onRequest: [app.authenticate] }, async (_req, reply) => {
     await db.setting.deleteMany({ where: { key: 'feed_token' } })
+    reply.code(204).send()
+  })
+
+  app.post('/settings', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const body = z.record(z.string(), z.string()).parse(req.body)
+    await Promise.all(Object.entries(body).map(([key, value]) => setSetting(key, value)))
     reply.code(204).send()
   })
 
