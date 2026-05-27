@@ -1,9 +1,9 @@
 import { Queue, Worker } from 'bullmq'
-import { redis } from '../queue.js'
+import { redis, redisOpts } from '../queue.js'
 import { db } from '../db.js'
 import { publishQueue } from '../queue.js'
 
-export const schedPublishQueue = new Queue('sched-publish', { connection: redis })
+export const schedPublishQueue = new Queue('sched-publish', { connection: redisOpts })
 
 export async function applyScheduledPublishSettings() {
   await schedPublishQueue.removeJobScheduler('sched-publish').catch(() => {})
@@ -66,7 +66,7 @@ export function startSchedPublishWorker() {
 
     console.log(`[sched-publish] queued ${published} publish tasks (${posts.length} posts, ${roundRobin ? 'round-robin' : 'all-sites'})`)
     return { published }
-  }, { connection: redis })
+  }, { connection: redisOpts })
 
   worker.on('failed', (job, err) => {
     console.error(`[sched-publish] job ${job?.id} failed:`, err.message)

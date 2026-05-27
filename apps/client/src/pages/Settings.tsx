@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { formatDistanceToNow } from 'date-fns'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -110,9 +111,16 @@ export function Settings() {
 
   const [fetchInterval, setFetchInterval] = useState<number | ''>('')
   const [webhookUrl, setWebhookUrl] = useState('')
+  const [showWebhookLog, setShowWebhookLog] = useState(false)
   const { data: webhookData } = useQuery<{ url: string }>({
     queryKey: ['webhook'],
     queryFn:  settingsApi.getWebhook,
+  })
+  const { data: webhookLogData } = useQuery<{ logs: any[] }>({
+    queryKey: ['webhook-log'],
+    queryFn:  settingsApi.getWebhookLog,
+    enabled:  showWebhookLog,
+    refetchInterval: showWebhookLog ? 15_000 : false,
   })
   const saveWebhook = useMutation({
     mutationFn: (url: string) => settingsApi.saveWebhook(url),
@@ -334,7 +342,26 @@ export function Settings() {
     <div className="space-y-6 max-w-2xl p-6 h-full overflow-y-auto">
       <div>
         <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-muted-foreground text-sm mt-1">Configure AI providers and defaults</p>
+        <div className="flex flex-wrap gap-2 mt-2">
+          {[
+            { id: 'ai', label: 'AI & Content' },
+            { id: 'fetching', label: 'Sources & Fetching' },
+            { id: 'publishing', label: 'Publishing' },
+            { id: 'integrations', label: 'Integrations' },
+            { id: 'security', label: 'Security' },
+            { id: 'data', label: 'Data' },
+          ].map(s => (
+            <a key={s.id} href={`#${s.id}`}
+              className="text-xs px-2.5 py-1 rounded-full bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80 transition-colors">
+              {s.label}
+            </a>
+          ))}
+        </div>
+      </div>
+
+      <div id="ai" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">AI &amp; Content</span>
+        <div className="flex-1 h-px bg-border" />
       </div>
 
       <Card>
@@ -361,6 +388,11 @@ export function Settings() {
           />
         </CardContent>
       </Card>
+
+      <div id="fetching" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sources &amp; Fetching</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
 
       <Card>
         <CardHeader>
@@ -391,6 +423,11 @@ export function Settings() {
           </Button>
         </CardContent>
       </Card>
+
+      <div id="publishing" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Publishing</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
 
       <Card>
         <CardHeader>
@@ -523,6 +560,11 @@ export function Settings() {
         </CardContent>
       </Card>
 
+      <div id="integrations" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Integrations</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Webhook Outbound</CardTitle>
@@ -549,8 +591,47 @@ export function Settings() {
               </Button>
             )}
           </div>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+            onClick={() => setShowWebhookLog(v => !v)}
+          >
+            {showWebhookLog ? '▲' : '▼'} Recent deliveries
+          </button>
+          {showWebhookLog && (
+            <div className="rounded-md border border-border/60 overflow-hidden">
+              {!webhookLogData?.logs?.length ? (
+                <p className="text-xs text-muted-foreground p-3">No deliveries recorded yet.</p>
+              ) : (
+                <div className="divide-y divide-border">
+                  {webhookLogData.logs.map((log: any) => (
+                    <div key={log.id} className="flex items-start justify-between gap-3 px-3 py-2 text-xs">
+                      <div className="flex items-center gap-2 shrink-0">
+                        {log.success
+                          ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                          : <XCircle className="h-3.5 w-3.5 text-red-400" />}
+                        <Badge variant={log.success ? 'success' : 'destructive'} className="text-[10px] px-1.5">
+                          {log.statusCode ?? 'ERR'}
+                        </Badge>
+                        <span className="text-muted-foreground">{log.durationMs}ms</span>
+                      </div>
+                      <span className="text-muted-foreground truncate flex-1">{log.responseBody?.slice(0, 80) ?? '—'}</span>
+                      <span className="text-muted-foreground shrink-0">
+                        {formatDistanceToNow(new Date(log.createdAt), { addSuffix: true })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
+
+      <div id="data" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Data</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
 
       <Card>
         <CardHeader>
@@ -578,6 +659,11 @@ export function Settings() {
           </div>
         </CardContent>
       </Card>
+
+      <div id="security" className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Security</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
 
       <Card>
         <CardHeader>
@@ -954,6 +1040,11 @@ export function Settings() {
       </Card>
 
       <Separator />
+
+      <div className="flex items-center gap-3 pt-1">
+        <span className="text-xs font-semibold uppercase tracking-wider text-destructive/70">Danger Zone</span>
+        <div className="flex-1 h-px bg-destructive/20" />
+      </div>
 
       <Card className="border-destructive/30">
         <CardHeader>

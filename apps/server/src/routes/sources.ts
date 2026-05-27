@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { fetch } from 'undici'
+import * as cheerio from 'cheerio'
 import { db } from '../db.js'
 import { fetchQueue, fetchQueueEvents } from '../queue.js'
 import { encrypt } from '../lib/crypto.js'
@@ -326,6 +327,40 @@ export async function sourcesRoutes(app: FastifyInstance) {
     const duplicates = results.filter(r => r.status === 'duplicate').length
     const errors     = results.filter(r => r.status === 'error').length
 
+    return reply.code(201).send({ created, duplicates, errors, results })
+  })
+
+  app.post('/sources/import-opml', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { content } = z.object({ content: z.string().min(1) }).parse(req.body)
+
+    const $ = cheerio.load(content, { xmlMode: true })
+    const urls: string[] = []
+    $('outline[xmlUrl]').each((_, el) => {
+      const url = $(el).attr('xmlUrl')
+      if (url) urls.push(url.trim())
+    })
+
+    if (!urls.length) return reply.code(422).send({ error: 'No RSS feeds found in OPML file' })
+
+    const results: Array<{ url: string; status: 'created' | 'duplicate' | 'error'; name?: string; error?: string }> = []
+    for (const rawUrl of urls) {
+      try {
+        const base = rawUrl.replace(/\/$/, '')
+        const name = new URL(base).hostname.replace(/^www\./, '')
+        const existing = await db.source.findFirst({ where: { endpoint: base } })
+        if (existing) { results.push({ url: rawUrl, status: 'duplicate', name: existing.name }); continue }
+        const title = $(`outline[xmlUrl="${rawUrl}"]`).attr('title') ||
+                      $(`outline[xmlUrl="${rawUrl}"]`).attr('text') || name
+        await db.source.create({ data: { name: title, endpoint: base, type: 'RSS', enabled: true } })
+        results.push({ url: rawUrl, status: 'created', name: title })
+      } catch (err) {
+        results.push({ url: rawUrl, status: 'error', error: err instanceof Error ? err.message : 'Invalid URL' })
+      }
+    }
+
+    const created    = results.filter(r => r.status === 'created').length
+    const duplicates = results.filter(r => r.status === 'duplicate').length
+    const errors     = results.filter(r => r.status === 'error').length
     return reply.code(201).send({ created, duplicates, errors, results })
   })
 

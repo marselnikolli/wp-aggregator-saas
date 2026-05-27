@@ -187,31 +187,50 @@ export function Posts() {
   const [sourceId,      setSourceId]      = useState('')
   const [category,      setCategory]      = useState('')
   const [dateDays,      setDateDays]      = useState(0)
+  const [searchInput,   setSearchInput]   = useState('')
+  const [search,        setSearch]        = useState('')
+  const [language,      setLanguage]      = useState('')
   const [selected,      setSelected]      = useState<any>(null)
   const [publishTarget, setPublishTarget] = useState<any>(null)
   const [checkedIds,    setCheckedIds]    = useState<Set<string>>(new Set())
   const [editMode,      setEditMode]      = useState(false)
   const [draft,         setDraft]         = useState({ title: '', excerpt: '', content: '' })
+  const [catInput,      setCatInput]      = useState('')
+  const [localCats,     setLocalCats]     = useState<string[] | null>(null)
   const [shortcutHelp,  setShortcutHelp]  = useState(false)
   const [bulkSiteId,    setBulkSiteId]    = useState('')
   const [bulkDialog,    setBulkDialog]    = useState(false)
   const qc = useQueryClient()
 
   useEffect(() => { setPage(1); setCategory('') }, [sourceId])
-  useEffect(() => { setPage(1) }, [category, dateDays, perPage])
+  useEffect(() => { setPage(1) }, [category, dateDays, perPage, search, language])
+
+  // Debounce search input
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput); setPage(1) }, 300)
+    return () => clearTimeout(t)
+  }, [searchInput])
   useEffect(() => { setCheckedIds(new Set()) }, [page])
-  useEffect(() => { setEditMode(false) }, [selected?.id])
+  useEffect(() => { setEditMode(false); setLocalCats(null); setCatInput('') }, [selected?.id])
 
   const dateFrom = useMemo(() => dateFromPreset(dateDays), [dateDays])
 
+  const { data: languagesData } = useQuery({
+    queryKey: ['post-languages'],
+    queryFn:  postsApi.languages,
+    staleTime: 5 * 60_000,
+  })
+
   const { data, isLoading } = useQuery({
-    queryKey: ['posts', page, perPage, sourceId, category, dateDays],
+    queryKey: ['posts', page, perPage, sourceId, category, dateDays, search, language],
     queryFn: () => postsApi.list({
       page,
       per_page: perPage,
       ...(sourceId && { sourceId }),
       ...(category && { category }),
       ...(dateFrom && { dateFrom }),
+      ...(search   && { search }),
+      ...(language && { language }),
     }),
     placeholderData: (prev: any) => prev,
     refetchInterval: 15_000,
@@ -346,6 +365,12 @@ export function Posts() {
               </button>
             </div>
           </div>
+          <Input
+            placeholder="Search posts…"
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            className="h-8 text-xs"
+          />
           <div className="flex gap-1.5">
             <select value={sourceId} onChange={e => setSourceId(e.target.value)}
               className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
@@ -361,6 +386,15 @@ export function Posts() {
               className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
               {DATE_PRESETS.map(p => <option key={p.days} value={p.days}>{p.label}</option>)}
             </select>
+            {languagesData?.length > 0 && (
+              <select value={language} onChange={e => { setLanguage(e.target.value); setPage(1) }}
+                className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
+                <option value="">All langs</option>
+                {languagesData.map((l: { code: string; count: number }) => (
+                  <option key={l.code} value={l.code}>{l.code} ({l.count})</option>
+                ))}
+              </select>
+            )}
           </div>
         </div>
 
@@ -531,13 +565,51 @@ export function Posts() {
                   {selected.author && <><span>·</span><span>{selected.author}</span></>}
                   <span>·</span>
                   <span>{format(new Date(selected.createdAt), 'dd MMM yyyy, HH:mm')}</span>
+                  {selected.originalUrl && (() => {
+                    try {
+                      const domain = new URL(selected.originalUrl).hostname.replace(/^www\./, '')
+                      return (
+                        <>
+                          <span>·</span>
+                          <a href={selected.originalUrl} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 text-primary hover:underline">
+                            {domain} <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        </>
+                      )
+                    } catch { return null }
+                  })()}
                 </div>
 
-                {/* Badges */}
-                <div className="flex flex-wrap gap-1.5">
-                  {selected.categories?.map((c: string) => (
-                    <Badge key={c} variant="secondary" className="text-xs">{c}</Badge>
+                {/* Editable categories */}
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {(localCats ?? selected.categories ?? []).map((c: string) => (
+                    <span key={c} className="inline-flex items-center gap-1 rounded-full bg-secondary px-2 py-0.5 text-xs">
+                      {c}
+                      <button className="text-muted-foreground hover:text-foreground leading-none" onClick={() => {
+                        const next = (localCats ?? selected.categories ?? []).filter((x: string) => x !== c)
+                        setLocalCats(next)
+                        updatePost.mutate({ categories: next } as any)
+                      }}>×</button>
+                    </span>
                   ))}
+                  <input
+                    value={catInput}
+                    onChange={e => setCatInput(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key !== 'Enter') return
+                      const val = catInput.trim()
+                      if (!val) return
+                      const cur = localCats ?? selected.categories ?? []
+                      if (cur.includes(val)) { setCatInput(''); return }
+                      const next = [...cur, val]
+                      setLocalCats(next)
+                      setCatInput('')
+                      updatePost.mutate({ categories: next } as any)
+                    }}
+                    placeholder="+ category"
+                    className="h-5 w-24 text-xs bg-transparent border-b border-border/60 focus:outline-none focus:border-primary placeholder:text-muted-foreground/50"
+                  />
                   {selected.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
                   {selected.language && selected.language !== 'en' && (
                     <Badge variant="outline" className="text-xs font-mono">{selected.language}</Badge>
@@ -551,6 +623,17 @@ export function Posts() {
                     <Badge variant="outline" className="text-xs text-orange-400 border-orange-500/30">Semantic dup</Badge>
                   )}
                 </div>
+
+                {/* AI Tags */}
+                {selected.aiTags?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {selected.aiTags.map((tag: string) => (
+                      <span key={tag} className="inline-flex items-center gap-0.5 rounded-full bg-violet-500/10 border border-violet-500/20 px-2 py-0.5 text-[11px] text-violet-400">
+                        # {tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {/* AI Summary */}
                 {selected.aiSummary && (

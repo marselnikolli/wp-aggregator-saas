@@ -16,6 +16,7 @@ const pipelineSchema = z.object({
   translateTo:        z.string().nullable().default(null),
   targetCategory:     z.string().nullable().default(null),
   publishWindowHours: z.number().int().min(0).max(168).default(0),
+  aiPrompt:           z.string().max(1000).nullable().default(null),
   sortOrder:          z.number().int().default(0),
 })
 
@@ -26,7 +27,7 @@ export async function pipelinesRoutes(app: FastifyInstance) {
 
   app.post('/pipelines', { onRequest: [app.authenticate] }, async (req) => {
     const data = pipelineSchema.parse(req.body)
-    return db.pipeline.create({ data: { ...data, sourceFilter: data.sourceFilter ?? undefined, translateTo: data.translateTo ?? undefined, targetCategory: data.targetCategory ?? undefined } })
+    return db.pipeline.create({ data: { ...data, sourceFilter: data.sourceFilter ?? undefined, translateTo: data.translateTo ?? undefined, targetCategory: data.targetCategory ?? undefined, aiPrompt: data.aiPrompt ?? undefined } })
   })
 
   app.patch('/pipelines/:id', { onRequest: [app.authenticate] }, async (req) => {
@@ -39,6 +40,7 @@ export async function pipelinesRoutes(app: FastifyInstance) {
         sourceFilter:   data.sourceFilter   === null ? undefined : data.sourceFilter,
         translateTo:    data.translateTo    ?? undefined,
         targetCategory: data.targetCategory ?? undefined,
+        aiPrompt:       data.aiPrompt       ?? undefined,
       },
     })
   })
@@ -88,7 +90,10 @@ export async function pipelinesRoutes(app: FastifyInstance) {
             categoryOverride: pipeline.targetCategory ?? null,
           },
         })
-        await publishQueue.add('publish', { taskId: task.id, translateTo: pipeline.translateTo ?? undefined }, delay ? { delay } : undefined)
+        await publishQueue.add('publish-post', {
+          publishTaskId: task.id,
+          aiPrompt: pipeline.aiPrompt ?? undefined,
+        }, delay ? { delay } : undefined)
         queued++
         taskIndex++
       }

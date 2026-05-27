@@ -1,12 +1,12 @@
 import { Worker, Queue, Job } from 'bullmq'
 import { fetch } from 'undici'
-import { redis } from '../queue.js'
+import { redis, redisOpts } from '../queue.js'
 import { db } from '../db.js'
 import { getSettingValue } from '../routes/settings.js'
 
 export interface SummarizeJobData { postId: string }
 
-export const summarizeQueue = new Queue<SummarizeJobData>('summarize', { connection: redis })
+export const summarizeQueue = new Queue<SummarizeJobData, any, string>('summarize', { connection: redisOpts })
 
 interface AiResult {
   summary:  string
@@ -139,16 +139,16 @@ async function processPost(postId: string) {
 
     if (result) {
       const extraCategories = [
-        ...result.keywords.filter(k => !post.categories.includes(k)),
         ...(result.category && !post.categories.includes(result.category) ? [result.category] : []),
       ]
       await db.aggregatedPost.update({
         where: { id: postId },
         data: {
-          aiSummary:      result.summary || undefined,
-          aiTitle:        result.title   || undefined,
-          excerpt:        (!post.excerpt || post.excerpt.length < 30) && result.excerpt ? result.excerpt : undefined,
-          categories:     extraCategories.length ? [...post.categories, ...extraCategories] : undefined,
+          aiSummary:  result.summary || undefined,
+          aiTitle:    result.title   || undefined,
+          excerpt:    (!post.excerpt || post.excerpt.length < 30) && result.excerpt ? result.excerpt : undefined,
+          categories: extraCategories.length ? [...post.categories, ...extraCategories] : undefined,
+          aiTags:     result.keywords.length ? result.keywords : undefined,
           qualityScore,
         },
       })
@@ -258,12 +258,12 @@ async function checkSemanticDuplicate(postId: string, embedding: number[], sourc
 }
 
 export function startSummarizerWorker() {
-  const worker = new Worker<SummarizeJobData>(
+  const worker = new Worker<SummarizeJobData, any, string>(
     'summarize',
-    async (job: Job<SummarizeJobData>) => {
+    async (job: Job<SummarizeJobData, any, string>) => {
       await processPost(job.data.postId)
     },
-    { connection: redis, concurrency: 2 },
+    { connection: redisOpts, concurrency: 2 },
   )
 
   worker.on('failed', (job, err) => {

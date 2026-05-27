@@ -3,7 +3,7 @@ import Parser from 'rss-parser'
 import * as cheerio from 'cheerio'
 import { createHash } from 'crypto'
 import { fetch, ProxyAgent } from 'undici'
-import { redis } from '../queue.js'
+import { redis, redisOpts } from '../queue.js'
 import { db } from '../db.js'
 import { decrypt } from '../lib/crypto.js'
 import { SourceType } from '@prisma/client'
@@ -12,6 +12,7 @@ import { summarizeQueue } from './summarizer.js'
 import { uploadImageFromUrl, slugify } from '../lib/image-storage.js'
 import { franc } from 'franc'
 import { getSettingValue } from '../routes/settings.js'
+import { decode as decodeHtmlEntities } from 'entities'
 
 const rss = new Parser({
   timeout: 10000,
@@ -209,7 +210,7 @@ function extractRssImage(item: any): string | null {
 function mapRssItem(item: any) {
   return {
     remoteId:    item.guid ?? item.link ?? '',
-    title:       item.title ?? '',
+    title:       decodeHtmlEntities(item.title ?? ''),
     content:     cleanContent(item.content ?? item.summary ?? ''),
     excerpt:     item.contentSnippet?.slice(0, 300) ?? '',
     imageUrl:    extractRssImage(item),
@@ -251,7 +252,7 @@ async function fetchWpApi(endpoint: string, auth?: { username: string; password:
 
     return {
       remoteId:    String(p.id),
-      title:       p.title?.rendered ?? '',
+      title:       decodeHtmlEntities(p.title?.rendered ?? ''),
       content:     cleanContent(p.content?.rendered ?? ''),
       excerpt:     p.excerpt?.rendered?.replace(/<[^>]+>/g, '').slice(0, 300) ?? '',
       imageUrl,
@@ -438,7 +439,7 @@ async function fetchCustomApi(source: {
 
         results.push({
           remoteId:    String(get('remoteId', 'id') ?? Math.random()),
-          title:       String(get('title', 'title') ?? ''),
+          title:       decodeHtmlEntities(String(get('title', 'title') ?? '')),
           content:     cleanContent(content),
           excerpt:     excerpt.slice(0, 300),
           imageUrl,
@@ -461,14 +462,28 @@ async function fetchCustomApi(source: {
 async function fireWebhook(post: { id: string; title: string; originalUrl: string | null; createdAt: Date }) {
   const row = await db.setting.findUnique({ where: { key: 'webhook_url' } })
   if (!row?.value) return
+  const url = row.value
+  const requestBody = JSON.stringify({ event: 'new_post', post })
+  const start = Date.now()
+  let statusCode: number | undefined
+  let responseBody: string | undefined
+  let success = false
   try {
-    await fetch(row.value, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: 'new_post', post }),
+      body: requestBody,
       signal: AbortSignal.timeout(5000),
     })
-  } catch { /* non-fatal */ }
+    statusCode = res.status
+    responseBody = (await res.text()).slice(0, 500)
+    success = res.ok
+  } catch (err) {
+    responseBody = (err as Error).message
+  }
+  db.webhookLog.create({
+    data: { url, statusCode, requestBody, responseBody, durationMs: Date.now() - start, success },
+  }).catch(() => {})
 }
 
 async function getBlocklist(): Promise<string[]> {
@@ -503,6 +518,28 @@ async function setCachedItems(sourceId: string, interval: string | null, items: 
   try {
     await redis.set(`feed-cache:${sourceId}`, JSON.stringify(items), 'EX', ttl)
   } catch { /* non-fatal */ }
+}
+
+async function tryOgImageFallback(postId: string, articleUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(articleUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WPAggregator/1.0)' },
+      signal: AbortSignal.timeout(8_000),
+    })
+    if (!res.ok) return false
+    const html = await res.text()
+    const $ = cheerio.load(html)
+    const ogImage =
+      $('meta[property="og:image"]').attr('content') ??
+      $('meta[name="twitter:image"]').attr('content') ??
+      $('meta[property="og:image:url"]').attr('content')
+    if (!ogImage) return false
+    const resolved = ogImage.startsWith('http') ? ogImage : new URL(ogImage, articleUrl).href
+    const slug = slugify(articleUrl.split('/').pop() ?? postId) || postId
+    const storedUrl = await uploadImageFromUrl(resolved, slug).catch(() => null)
+    await db.aggregatedPost.update({ where: { id: postId }, data: { imageUrl: storedUrl ?? resolved } })
+    return true
+  } catch { return false }
 }
 
 async function tryUnsplashFallback(postId: string, title: string): Promise<void> {
@@ -592,6 +629,10 @@ async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise
           if (s3Url) db.aggregatedPost.update({ where: { id: created.id }, data: { imageUrl: s3Url } }).catch(() => {})
         })
         .catch(() => {})
+    } else if (created.originalUrl) {
+      tryOgImageFallback(created.id, created.originalUrl)
+        .then(found => { if (!found) tryUnsplashFallback(created.id, created.title).catch(() => {}) })
+        .catch(() => tryUnsplashFallback(created.id, created.title).catch(() => {}))
     } else {
       tryUnsplashFallback(created.id, created.title).catch(() => {})
     }
@@ -619,9 +660,9 @@ async function releaseLock(sourceId: string) {
 }
 
 export function startFetchWorker() {
-  const worker = new Worker<FetchJobData>(
+  const worker = new Worker<FetchJobData, any, string>(
     'fetch',
-    async (job: Job<FetchJobData>) => {
+    async (job: Job<FetchJobData, any, string>) => {
       const { sourceId } = job.data
 
       // Distributed lock — skip if another worker is already fetching this source
@@ -657,7 +698,7 @@ export function startFetchWorker() {
         await releaseLock(sourceId)
       }
     },
-    { connection: redis, concurrency: 3 },
+    { connection: redisOpts, concurrency: 3 },
   )
 
   worker.on('failed', (job, err) => {

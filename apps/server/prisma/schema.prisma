@@ -95,6 +95,7 @@ model AggregatedPost {
   author         String?
   hash           String         @unique
   categories     String[]       @default([])
+  aiTags         String[]       @default([])
   language       String         @default("en")
   aiSummary         String?        @db.Text
   aiTitle           String?
@@ -200,11 +201,25 @@ model Pipeline {
   translateTo          String?
   targetCategory       String?
   publishWindowHours   Int      @default(0)
+  aiPrompt             String?
   sortOrder            Int      @default(0)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
   @@index([enabled])
+}
+
+model WebhookLog {
+  id           String   @id @default(cuid())
+  url          String
+  statusCode   Int?
+  requestBody  String   @db.Text
+  responseBody String?  @db.Text
+  durationMs   Int?
+  success      Boolean
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt])
 }
 
 model AuditLog {

@@ -14,6 +14,7 @@ export async function postsRoutes(app: FastifyInstance) {
       category:      z.string().optional(),
       dateFrom:      z.string().optional(),
       search:        z.string().optional(),
+      language:      z.string().optional(),
     }).parse(req.query)
 
     const where: any = {
@@ -22,6 +23,7 @@ export async function postsRoutes(app: FastifyInstance) {
       ...(query.category      && { categories: { has: query.category } }),
       ...(query.dateFrom      && { createdAt: { gte: new Date(query.dateFrom) } }),
       ...(query.search        && { title: { contains: query.search, mode: 'insensitive' as const } }),
+      ...(query.language      && { language: query.language }),
     }
 
     const [total, items] = await Promise.all([
@@ -152,5 +154,62 @@ export async function postsRoutes(app: FastifyInstance) {
     await db.aggregatedPost.delete({ where: { id } })
     audit('post.delete', { userId: jwt.sub, userEmail: jwt.email, resourceType: 'post', resourceId: id, metadata: { title: post?.title } })
     return reply.code(204).send()
+  })
+
+  // Distinct language codes present in aggregated posts with counts
+  app.get('/posts/languages', { preHandler: [app.authenticate] }, async () => {
+    const rows = await db.$queryRaw<Array<{ language: string; count: bigint }>>`
+      SELECT language, COUNT(*) AS count
+      FROM "AggregatedPost"
+      WHERE language IS NOT NULL AND language != 'und'
+      GROUP BY language
+      ORDER BY count DESC
+    `
+    return rows.map(r => ({ code: r.language, count: Number(r.count) }))
+  })
+
+  // Publish task history
+  app.get('/publish-tasks', { preHandler: [app.authenticate] }, async (req) => {
+    const query = z.object({
+      page:     z.coerce.number().min(1).default(1),
+      per_page: z.coerce.number().min(1).max(100).default(25),
+      status:   z.enum(['PENDING', 'PROCESSING', 'DONE', 'FAILED']).optional(),
+      siteId:   z.string().optional(),
+    }).parse(req.query)
+
+    const where: any = {
+      ...(query.status && { status: query.status }),
+      ...(query.siteId && { siteId: query.siteId }),
+    }
+
+    const [total, items] = await Promise.all([
+      db.publishTask.count({ where }),
+      db.publishTask.findMany({
+        where,
+        skip: (query.page - 1) * query.per_page,
+        take: query.per_page,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          post: { select: { id: true, title: true, originalUrl: true } },
+          site: { select: { id: true, name: true } },
+        },
+      }),
+    ])
+    return { total, pages: Math.ceil(total / query.per_page), page: query.page, items }
+  })
+
+  // Retry a failed publish task
+  app.post('/publish-tasks/:id/retry', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { id } = req.params as { id: string }
+    const task = await db.publishTask.findUniqueOrThrow({ where: { id } })
+    if (task.status !== 'FAILED') {
+      return reply.code(422).send({ error: 'Only FAILED tasks can be retried' })
+    }
+    await db.publishTask.update({
+      where: { id },
+      data: { status: 'PENDING', error: null },
+    })
+    await publishQueue.add('publish-post', { publishTaskId: id })
+    return { queued: true }
   })
 }

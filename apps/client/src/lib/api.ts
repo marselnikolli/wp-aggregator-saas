@@ -38,6 +38,7 @@ export const sourcesApi = {
   fetch:      (id: string) => api.post(`/sources/${id}/fetch`).then(r => r.data),
   fetchAll:   () => api.post('/sources/fetch-all').then(r => r.data),
   import:     (urls: string[]) => api.post('/sources/import', { urls }).then(r => r.data),
+  importOpml: (content: string) => api.post('/sources/import-opml', { content }).then(r => r.data),
   categories: (id: string) => api.get(`/sources/${id}/categories`).then(r => r.data),
   detect:     (url: string) => api.post('/sources/detect', { url }).then(r => r.data),
   scanCustom: (endpoint: string) => api.post('/sources/scan-custom', { endpoint }).then(r => r.data),
@@ -50,18 +51,22 @@ export const postsApi = {
   list:       (p?: any) => api.get('/posts', { params: p }).then(r => r.data),
   categories: (sourceId?: string) =>
     api.get('/posts/categories', { params: sourceId ? { sourceId } : undefined }).then(r => r.data),
+  languages:  () => api.get('/posts/languages').then(r => r.data),
   publish: (id: string, sites: Array<{ siteId: string; wpStatus?: 'publish' | 'draft' | 'future'; scheduledDate?: string; categoryOverride?: string; tagOverrides?: string[] }>) =>
     api.post(`/posts/${id}/publish`, { sites }).then(r => r.data),
   bulkPublish: (d: { postIds: string[]; siteId: string; categoryOverride?: string }) =>
     api.post('/posts/bulk-publish', d).then(r => r.data),
   remove:  (id: string) => api.delete(`/posts/${id}`),
   update:  (id: string, d: any) => api.patch(`/posts/${id}`, d).then(r => r.data),
+  publishTasks:     (p?: any) => api.get('/publish-tasks', { params: p }).then(r => r.data),
+  retryPublishTask: (id: string) => api.post(`/publish-tasks/${id}/retry`).then(r => r.data),
 }
 
 export const dashboardApi = {
   stats:    () => api.get('/dashboard/stats').then(r => r.data),
   queues:   () => api.get('/dashboard/queues').then(r => r.data),
   trending: () => api.get('/dashboard/trending').then(r => r.data),
+  activity: () => api.get('/dashboard/activity').then(r => r.data),
 }
 
 export const settingsApi = {
@@ -88,6 +93,7 @@ export const settingsApi = {
   importData:       (data: any) => api.post('/settings/import', data).then(r => r.data),
   getWebhook:           () => api.get('/settings/webhook').then(r => r.data),
   saveWebhook:          (url: string) => api.post('/settings/webhook', { url }),
+  getWebhookLog:        () => api.get('/settings/webhook-log').then(r => r.data),
   getScheduledPublish:  () => api.get('/settings/scheduled-publish').then(r => r.data),
   saveScheduledPublish: (d: any) => api.post('/settings/scheduled-publish', d).then(r => r.data),
   getIpAllowlist:       () => api.get('/settings/ip-allowlist').then(r => r.data),

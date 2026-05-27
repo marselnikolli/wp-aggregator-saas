@@ -35,6 +35,7 @@ interface Pipeline {
   translateTo: string | null
   targetCategory: string | null
   publishWindowHours: number
+  aiPrompt: string | null
 }
 
 const emptyForm = (): Omit<Pipeline, 'id'> => ({
@@ -50,6 +51,7 @@ const emptyForm = (): Omit<Pipeline, 'id'> => ({
   translateTo: null,
   targetCategory: null,
   publishWindowHours: 0,
+  aiPrompt: null,
 })
 
 function PipelineForm({
@@ -178,6 +180,17 @@ function PipelineForm({
       </div>
 
       <div className="grid gap-1.5">
+        <Label>AI rewrite instruction <span className="text-muted-foreground text-xs">(optional)</span></Label>
+        <textarea
+          rows={3}
+          placeholder="e.g. Rewrite as a concise 3-paragraph news article in formal English"
+          value={form.aiPrompt ?? ''}
+          onChange={e => setForm(p => ({ ...p, aiPrompt: e.target.value || null }))}
+          className="rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
+        />
+      </div>
+
+      <div className="grid gap-1.5">
         <Label>Target sites</Label>
         <div className="flex flex-col gap-1.5 max-h-40 overflow-y-auto border border-border rounded-md p-2">
           {sites.map(site => (
@@ -295,6 +308,9 @@ export function Pipelines() {
                     )}
                     {p.publishWindowHours > 0 && (
                       <Badge variant="outline">{p.publishWindowHours}h window</Badge>
+                    )}
+                    {p.aiPrompt && (
+                      <Badge variant="outline" className="text-violet-400 border-violet-500/30">AI rewrite</Badge>
                     )}
                   </div>
                   {!p.schedule && (

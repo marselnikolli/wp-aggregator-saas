@@ -42,6 +42,12 @@ export function Dashboard() {
     refetchInterval: 60_000,
   })
 
+  const { data: activityData } = useQuery({
+    queryKey: ['dashboard-activity'],
+    queryFn: dashboardApi.activity,
+    refetchInterval: 60_000,
+  })
+
   if (isLoading) return (
     <div className="space-y-6">
       <div>
@@ -69,6 +75,41 @@ export function Dashboard() {
         <StatCard title="Pending Review"  value={data?.pending ?? 0}   icon={Clock}       description="Awaiting approval" />
         <StatCard title="Published"       value={data?.published ?? 0} icon={CheckCircle} description="Total posts pushed" />
       </div>
+
+      {/* Publishing activity chart */}
+      {activityData?.days && (() => {
+        const days: Array<{ date: string; count: number }> = activityData.days
+        const maxCount = Math.max(...days.map((d: any) => d.count), 1)
+        const total = days.reduce((s: number, d: any) => s + d.count, 0)
+        return (
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">Publishing Activity</CardTitle>
+              <span className="text-xs text-muted-foreground">{total} posts · last 30 days</span>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-end gap-0.5 h-16">
+                {days.map((d: any) => (
+                  <div key={d.date} className="flex-1 flex flex-col items-center justify-end group relative"
+                    title={`${d.date}: ${d.count} published`}>
+                    <div
+                      className="w-full rounded-sm bg-primary/70 group-hover:bg-primary transition-colors"
+                      style={{ height: `${Math.max((d.count / maxCount) * 100, d.count > 0 ? 8 : 2)}%` }}
+                    />
+                    <div className="absolute -top-7 left-1/2 -translate-x-1/2 hidden group-hover:flex bg-popover border border-border rounded px-1.5 py-0.5 text-xs whitespace-nowrap z-10 pointer-events-none">
+                      {d.date.slice(5)}: {d.count}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between text-[10px] text-muted-foreground mt-1">
+                <span>{activityData.days[0]?.date?.slice(5)}</span>
+                <span>today</span>
+              </div>
+            </CardContent>
+          </Card>
+        )
+      })()}
 
       {/* Trending stories */}
       <div>

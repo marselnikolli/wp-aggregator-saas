@@ -1,13 +1,15 @@
 import { Worker, Job } from 'bullmq'
 import { fetch } from 'undici'
-import { redis } from '../queue.js'
+import { redis, redisOpts } from '../queue.js'
 import { db } from '../db.js'
 import { WPClient } from '../lib/wp-client.js'
 import { decrypt } from '../lib/crypto.js'
 import { uploadImage } from '../lib/image-storage.js'
+import { getSettingValue } from '../routes/settings.js'
 
 export interface PublishJobData {
   publishTaskId: string
+  aiPrompt?: string
 }
 
 const EXT_MIME: Record<string, string> = {
@@ -43,7 +45,41 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; mimeType: s
   }
 }
 
-async function runPublishTask(taskId: string) {
+async function applyAiPrompt(content: string, title: string, prompt: string): Promise<string> {
+  const [anthropicKey, openaiKey] = await Promise.all([
+    getSettingValue('anthropic_key'),
+    getSettingValue('openai_key'),
+  ])
+  const system = `You are a content editor. Rewrite the provided article according to this instruction: ${prompt}\nReturn only the rewritten HTML content, nothing else.`
+  const userMsg = `Title: ${title}\n\nContent: ${content.slice(0, 4000)}`
+
+  if (anthropicKey) {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': anthropicKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 2000, system, messages: [{ role: 'user', content: userMsg }] }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (res.ok) {
+      const data = await res.json() as { content: Array<{ text: string }> }
+      return data.content[0]?.text ?? content
+    }
+  } else if (openaiKey) {
+    const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${openaiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gpt-4o-mini', max_tokens: 2000, messages: [{ role: 'system', content: system }, { role: 'user', content: userMsg }] }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    if (res.ok) {
+      const data = await res.json() as { choices: Array<{ message: { content: string } }> }
+      return data.choices[0]?.message?.content ?? content
+    }
+  }
+  return content
+}
+
+async function runPublishTask(taskId: string, aiPrompt?: string) {
   const task = await db.publishTask.findUniqueOrThrow({
     where:   { id: taskId },
     include: {
@@ -115,7 +151,9 @@ async function runPublishTask(taskId: string) {
     }
   }
 
-  const tagSources = task.tagOverrides?.length ? task.tagOverrides : task.post.categories
+  const tagSources = task.tagOverrides?.length ? task.tagOverrides
+    : task.post.categories.length ? task.post.categories
+    : task.post.aiTags
   for (const name of tagSources) {
     try { tagIds.push(await client.getOrCreateTag(name)) }
     catch { /* tags are best-effort */ }
@@ -123,9 +161,14 @@ async function runPublishTask(taskId: string) {
 
   const wpStatus = (task.wpStatus ?? 'publish') as 'publish' | 'draft' | 'future'
 
+  const baseContent = task.post.aiSummary ?? task.post.content ?? ''
+  const finalContent = aiPrompt && baseContent
+    ? await applyAiPrompt(baseContent, task.post.aiTitle ?? task.post.title, aiPrompt).catch(() => baseContent)
+    : baseContent
+
   const payload = {
     title:           task.post.aiTitle ?? task.post.title,
-    content:         task.post.aiSummary ?? task.post.content ?? '',
+    content:         finalContent,
     excerpt:         task.post.excerpt ?? undefined,
     status:          wpStatus,
     date:            task.scheduledDate?.toISOString(),
@@ -166,11 +209,11 @@ async function runPublishTask(taskId: string) {
 }
 
 export function startPublishWorker() {
-  const worker = new Worker<PublishJobData>(
+  const worker = new Worker<PublishJobData, any, string>(
     'publish',
-    async (job: Job<PublishJobData>) => {
+    async (job: Job<PublishJobData, any, string>) => {
       try {
-        await runPublishTask(job.data.publishTaskId)
+        await runPublishTask(job.data.publishTaskId, job.data.aiPrompt)
       } catch (err) {
         const error = err instanceof Error ? err.message : String(err)
         await db.publishTask.update({
@@ -180,7 +223,7 @@ export function startPublishWorker() {
         throw err
       }
     },
-    { connection: redis, concurrency: 2 },
+    { connection: redisOpts, concurrency: 2 },
   )
 
   worker.on('failed', (job: Job<PublishJobData> | undefined, err: Error) => {

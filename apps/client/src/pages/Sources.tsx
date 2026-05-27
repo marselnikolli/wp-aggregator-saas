@@ -861,7 +861,27 @@ export function Sources() {
             Fetch All
           </Button>
           <Button variant="outline" onClick={() => setImportOpen(true)}>
-            <Upload />Import
+            <Upload />Import URLs
+          </Button>
+          <Button variant="outline" onClick={() => {
+            const input = document.createElement('input')
+            input.type = 'file'
+            input.accept = '.opml,.xml'
+            input.onchange = async () => {
+              const file = input.files?.[0]
+              if (!file) return
+              try {
+                const content = await file.text()
+                const result = await sourcesApi.importOpml(content)
+                invalidate()
+                toast.success(`OPML: ${result.created} created, ${result.duplicates} duplicates${result.errors ? `, ${result.errors} errors` : ''}`)
+              } catch (e: any) {
+                toast.error(e.response?.data?.error ?? 'OPML import failed')
+              }
+            }
+            input.click()
+          }}>
+            <FileUp />Import OPML
           </Button>
           <Button onClick={() => setOpen(true)}><Plus />Add Source</Button>
         </div>

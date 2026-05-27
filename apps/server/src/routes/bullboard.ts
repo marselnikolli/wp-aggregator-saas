@@ -6,12 +6,12 @@ const { BullMQAdapter } = require('@bull-board/api/bullMQAdapter')
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { FastifyAdapter } = require('@bull-board/fastify')
 import { Queue } from 'bullmq'
-import { redis } from '../queue.js'
+import { redisOpts } from '../queue.js'
 import { summarizeQueue } from '../workers/summarizer.js'
 
 export async function bullboardRoutes(app: FastifyInstance) {
-  const fetchQueue    = new Queue('fetch',   { connection: redis })
-  const publishQueue  = new Queue('publish', { connection: redis })
+  const fetchQueue    = new Queue('fetch',   { connection: redisOpts })
+  const publishQueue  = new Queue('publish', { connection: redisOpts })
 
   const serverAdapter = new FastifyAdapter()
   serverAdapter.setBasePath('/admin/queues')

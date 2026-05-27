@@ -23,6 +23,26 @@
     --destructive-foreground: 0 86% 97%;
     --radius:       0.5rem;
   }
+
+  .light {
+    --background:   0 0% 100%;
+    --foreground:   240 10% 10%;
+    --card:         0 0% 98%;
+    --card-foreground: 240 10% 10%;
+    --border:       240 6% 88%;
+    --input:        240 6% 88%;
+    --ring:         258 80% 56%;
+    --primary:      258 80% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary:    240 5% 94%;
+    --secondary-foreground: 240 10% 20%;
+    --muted:        240 5% 94%;
+    --muted-foreground: 240 4% 46%;
+    --accent:       258 80% 56%;
+    --accent-foreground: 0 0% 100%;
+    --destructive:  0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+  }
 }
 
 @layer base {

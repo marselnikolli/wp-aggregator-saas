@@ -139,6 +139,14 @@ export async function settingsRoutes(app: FastifyInstance) {
     reply.code(204).send()
   })
 
+  app.get('/settings/webhook-log', { onRequest: [app.authenticate] }, async () => {
+    const logs = await db.webhookLog.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    })
+    return { logs }
+  })
+
   app.post('/settings/import', { onRequest: [app.authenticate] }, async (req, reply) => {
     const body = z.object({
       version:  z.number(),

@@ -10,7 +10,8 @@ import { Posts }     from '@/pages/Posts'
 import { Settings }  from '@/pages/Settings'
 import { AuditLog }  from '@/pages/AuditLog'
 import { Team }      from '@/pages/Team'
-import { Pipelines } from '@/pages/Pipelines'
+import { Pipelines }      from '@/pages/Pipelines'
+import { PublishHistory } from '@/pages/PublishHistory'
 import { Login }     from '@/pages/Login'
 import { Skeleton }  from '@/components/ui/skeleton'
 
@@ -49,7 +50,8 @@ function AppRoutes() {
         <Route path="settings"  element={<Settings />} />
         <Route path="audit-log" element={<AuditLog />} />
         <Route path="team"       element={<Team />} />
-        <Route path="pipelines"  element={<Pipelines />} />
+        <Route path="pipelines"     element={<Pipelines />} />
+        <Route path="history"       element={<PublishHistory />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

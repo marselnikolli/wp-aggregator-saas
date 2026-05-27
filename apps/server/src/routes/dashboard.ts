@@ -119,6 +119,26 @@ export async function dashboardRoutes(app: FastifyInstance) {
     return { trending }
   })
 
+  app.get('/dashboard/activity', { preHandler: [app.authenticate] }, async () => {
+    const rows = await db.$queryRaw<Array<{ date: string; count: bigint }>>`
+      SELECT TO_CHAR("publishedDate", 'YYYY-MM-DD') AS date, COUNT(*) AS count
+      FROM "AggregatedPost"
+      WHERE "publishedDate" >= NOW() - INTERVAL '30 days'
+        AND "publishStatus" = 'PUBLISHED'
+      GROUP BY date
+      ORDER BY date ASC
+    `
+    // Fill in zero-count days for a full 30-day window
+    const map = new Map(rows.map(r => [r.date, Number(r.count)]))
+    const days: Array<{ date: string; count: number }> = []
+    for (let i = 29; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 24 * 60 * 60 * 1000)
+      const key = d.toISOString().slice(0, 10)
+      days.push({ date: key, count: map.get(key) ?? 0 })
+    }
+    return { days }
+  })
+
   app.get('/dashboard/queues', { preHandler: [app.authenticate] }, async () => {
     const [f, p, s] = await Promise.all([
       fetchQueue.getJobCounts('waiting', 'active', 'failed'),
