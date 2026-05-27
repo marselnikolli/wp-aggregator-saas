@@ -140,3 +140,18 @@ export const usersApi = {
   update: (id: string, d: any) => api.patch(`/users/${id}`, d).then(r => r.data),
   remove: (id: string) => api.delete(`/users/${id}`),
 }
+
+export const socialApi = {
+  accounts:       () => api.get('/social-accounts').then(r => r.data),
+  createAccount:  (data: any) => api.post('/social-accounts', data).then(r => r.data),
+  updateAccount:  (id: string, data: any) => api.patch(`/social-accounts/${id}`, data).then(r => r.data),
+  deleteAccount:  (id: string) => api.delete(`/social-accounts/${id}`),
+  testAccount:    (id: string) => api.post(`/social-accounts/${id}/test`).then(r => r.data),
+  publish:        (data: any) => api.post('/social/publish', data).then(r => r.data),
+  history:        (params?: any) => api.get('/social/history', { params }).then(r => r.data),
+  retryPost:      (id: string) => api.post(`/social/history/${id}/retry`).then(r => r.data),
+  cancelPost:     (id: string) => api.delete(`/social/history/${id}`),
+  analytics:      () => api.get('/social/analytics').then(r => r.data),
+  previewCaption: (postId: string, accountId: string, template: string) =>
+    api.post('/social/preview-caption', { postId, accountId, template }).then(r => r.data),
+}

@@ -23,10 +23,13 @@ import { usersRoutes } from './routes/users.js'
 import { apiKeysRoutes, resolveApiKey } from './routes/apiKeys.js'
 import { pipelinesRoutes } from './routes/pipelines.js'
 import { feedRoutes } from './routes/feed.js'
+import { socialAccountsRoutes } from './routes/socialAccounts.js'
+import { socialRoutes } from './routes/social.js'
 import { startFetchWorker } from './workers/fetcher.js'
 import { startPublishWorker } from './workers/publisher.js'
 import { startSummarizerWorker } from './workers/summarizer.js'
 import { startSchedPublishWorker, applyScheduledPublishSettings } from './workers/schedPublisher.js'
+import { startSocialWorker } from './workers/socialWorker.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -124,7 +127,9 @@ async function bootstrap() {
   await app.register(metricsRoutes)
   await app.register(usersRoutes,     { prefix })
   await app.register(apiKeysRoutes,   { prefix })
-  await app.register(pipelinesRoutes, { prefix })
+  await app.register(pipelinesRoutes,      { prefix })
+  await app.register(socialAccountsRoutes, { prefix })
+  await app.register(socialRoutes,         { prefix })
   await app.register(bullboardRoutes)
   await app.register(feedRoutes)
 
@@ -136,6 +141,7 @@ async function bootstrap() {
     startPublishWorker()
     startSummarizerWorker()
     startSchedPublishWorker()
+    startSocialWorker()
     await registerSourceSchedulers()
     await applyScheduledPublishSettings()
   }

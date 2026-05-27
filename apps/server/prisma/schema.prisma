@@ -46,6 +46,7 @@ model Site {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   publishTasks    PublishTask[]
+  socialAccounts  SocialAccount[]
 
   @@index([enabled])
 }
@@ -108,6 +109,7 @@ model AggregatedPost {
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   publishTasks   PublishTask[]
+  socialPosts    SocialPost[]
 
   @@index([sourceId])
   @@index([publishStatus])
@@ -203,6 +205,8 @@ model Pipeline {
   publishWindowHours   Int      @default(0)
   aiPrompt             String?
   sortOrder            Int      @default(0)
+  socialAccountId      String?
+  socialTemplate       String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -235,4 +239,69 @@ model AuditLog {
   @@index([createdAt])
   @@index([userId])
   @@index([resourceType, resourceId])
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+enum SocialStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  SCHEDULED
+  CANCELLED
+}
+
+model SocialAccount {
+  id          String         @id @default(cuid())
+  name        String
+  platform    SocialPlatform
+  pageId      String
+  accessToken String
+  siteId      String?
+  site        Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  enabled     Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  socialPosts SocialPost[]
+}
+
+model SocialPost {
+  id             String         @id @default(cuid())
+  postId         String
+  post           AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  accountId      String
+  account        SocialAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  platform       SocialPlatform
+  template       String
+  status         SocialStatus   @default(PENDING)
+  scheduledAt    DateTime?
+  publishedAt    DateTime?
+  platformPostId String?
+  error          String?
+  reach          Int?
+  impressions    Int?
+  engagement     Int?
+  createdAt      DateTime       @default(now())
+
+  @@index([postId])
+  @@index([accountId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CaptionTemplate {
+  id              String         @id @default(cuid())
+  name            String
+  platform        SocialPlatform
+  language        String         @default("sq")
+  includeHashtags Boolean        @default(true)
+  includeExcerpt  Boolean        @default(false)
+  brandingText    String?
+  emojiStyle      String         @default("category")
+  categoryColors  Json?
+  createdAt       DateTime       @default(now())
 }

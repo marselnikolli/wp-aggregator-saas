@@ -3,11 +3,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Upload, Trash2, FileText,
   Loader2, ExternalLink, ChevronLeft, ChevronRight,
-  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles,
+  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles, Share2,
 } from 'lucide-react'
 import { formatDistanceToNow, format, sub } from 'date-fns'
 import { toast } from 'sonner'
-import { postsApi, sitesApi, sourcesApi } from '@/lib/api'
+import { postsApi, sitesApi, sourcesApi, socialApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -19,6 +19,140 @@ import { cn } from '@/lib/utils'
 import { RichTextEditor } from '@/components/RichTextEditor'
 
 const PER_PAGE = [10, 25, 50, 100] as const
+
+const SOCIAL_TEMPLATES = [
+  { value: 'photo_comment', label: 'Photo + Comment' },
+  { value: 'link_post',     label: 'Link Post'       },
+  { value: 'photo_only',   label: 'Photo Only'       },
+  { value: 'text_link',    label: 'Text + Link'      },
+  { value: 'image_overlay',label: 'Image Overlay'    },
+] as const
+
+function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
+  const [accountId,   setAccountId]   = useState('')
+  const [template,    setTemplate]    = useState('link_post')
+  const [scheduledAt, setScheduledAt] = useState('')
+  const [caption,     setCaption]     = useState('')
+  const [captionLoading, setCaptionLoading] = useState(false)
+  const [result,      setResult]      = useState<{ ok: boolean; message: string } | null>(null)
+  const [publishing,  setPublishing]  = useState(false)
+
+  const { data: accounts } = useQuery({
+    queryKey: ['social-accounts'],
+    queryFn:  socialApi.accounts,
+  })
+
+  useEffect(() => {
+    if (!accountId || !template || !post?.id) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setCaptionLoading(true)
+      try {
+        const res = await socialApi.previewCaption(post.id, accountId, template)
+        if (!cancelled) setCaption(res.caption ?? '')
+      } catch {
+        if (!cancelled) setCaption('')
+      } finally {
+        if (!cancelled) setCaptionLoading(false)
+      }
+    }, 500)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [accountId, template, post?.id])
+
+  async function handlePublish() {
+    if (!accountId) return
+    setPublishing(true)
+    setResult(null)
+    try {
+      await socialApi.publish({
+        postId:      post.id,
+        accountId,
+        template,
+        scheduledAt: scheduledAt || undefined,
+      })
+      setResult({ ok: true, message: scheduledAt ? 'Scheduled successfully' : 'Published successfully' })
+    } catch (e: any) {
+      setResult({ ok: false, message: e.response?.data?.error ?? 'Publish failed' })
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
+        <div className="space-y-4 py-2">
+          <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
+
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Account</Label>
+            <select
+              value={accountId}
+              onChange={e => setAccountId(e.target.value)}
+              className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">Select account…</option>
+              {(accounts ?? []).filter((a: any) => a.enabled).map((a: any) => (
+                <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Template</Label>
+            <select
+              value={template}
+              onChange={e => setTemplate(e.target.value)}
+              className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              {SOCIAL_TEMPLATES.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="grid gap-1.5">
+            <Label className="text-xs">
+              Schedule <span className="text-muted-foreground">(optional — leave blank to post now)</span>
+            </Label>
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={e => setScheduledAt(e.target.value)}
+              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+
+          {accountId && (
+            <div className="grid gap-1.5">
+              <Label className="text-xs flex items-center gap-1.5">
+                Caption preview
+                {captionLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+              </Label>
+              <pre className="rounded-md border border-border bg-secondary/50 px-3 py-2.5 text-xs whitespace-pre-wrap min-h-[60px] text-foreground/80">
+                {captionLoading ? 'Loading…' : caption || 'No preview available'}
+              </pre>
+            </div>
+          )}
+
+          {result && (
+            <p className={`text-sm ${result.ok ? 'text-emerald-400' : 'text-destructive'}`}>
+              {result.message}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handlePublish} disabled={!accountId || publishing}>
+            {publishing && <Loader2 className="animate-spin" />}
+            {scheduledAt ? 'Schedule' : 'Share now'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 const DATE_PRESETS = [
   { label: 'All time',      days: 0  },
@@ -192,6 +326,7 @@ export function Posts() {
   const [language,      setLanguage]      = useState('')
   const [selected,      setSelected]      = useState<any>(null)
   const [publishTarget, setPublishTarget] = useState<any>(null)
+  const [shareTarget,   setShareTarget]   = useState<any>(null)
   const [checkedIds,    setCheckedIds]    = useState<Set<string>>(new Set())
   const [editMode,      setEditMode]      = useState(false)
   const [draft,         setDraft]         = useState({ title: '', excerpt: '', content: '' })
@@ -531,6 +666,9 @@ export function Posts() {
                 <Button size="sm" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
                   <Upload className="h-3 w-3 mr-1" />Publish
                 </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShareTarget(selected)}>
+                  <Share2 className="h-3 w-3 mr-1" />Share
+                </Button>
                 <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive ml-auto"
                   onClick={() => remove.mutate(selected.id)} disabled={remove.isPending}>
                   {remove.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
@@ -709,6 +847,9 @@ export function Posts() {
 
       {publishTarget && (
         <PublishDialog post={publishTarget} open={!!publishTarget} onClose={() => setPublishTarget(null)} />
+      )}
+      {shareTarget && (
+        <ShareDialog post={shareTarget} open={!!shareTarget} onClose={() => setShareTarget(null)} />
       )}
       <ShortcutHelp open={shortcutHelp} onClose={() => setShortcutHelp(false)} />
     </div>
