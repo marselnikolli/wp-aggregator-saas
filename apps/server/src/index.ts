@@ -27,6 +27,7 @@ import { socialAccountsRoutes } from './routes/socialAccounts.js'
 import { socialRoutes } from './routes/social.js'
 import { captionTemplatesRoutes } from './routes/captionTemplates.js'
 import { imageTemplatesRoutes } from './routes/imageTemplates.js'
+import { dedupRoutes } from './routes/dedup.js'
 import { startFetchWorker } from './workers/fetcher.js'
 import { startPublishWorker } from './workers/publisher.js'
 import { startSummarizerWorker } from './workers/summarizer.js'
@@ -135,6 +136,7 @@ async function bootstrap() {
   await app.register(socialRoutes,            { prefix })
   await app.register(captionTemplatesRoutes,  { prefix: '/api/social' })
   await app.register(imageTemplatesRoutes,    { prefix })
+  await app.register(dedupRoutes,               { prefix })
   await app.register(bullboardRoutes)
   await app.register(feedRoutes)
 

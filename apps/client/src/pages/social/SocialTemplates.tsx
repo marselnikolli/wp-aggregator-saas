@@ -627,6 +627,8 @@ export function SocialTemplates() {
 
   // ── Mutations ───────────────────────────────────────────────────────────────
 
+  const [idBeingDeleted, setIdBeingDeleted] = useState<string | null>(null)
+
   const save = useMutation({
     mutationFn: () => {
       const body = { name, platform, elements }
@@ -640,6 +642,22 @@ export function SocialTemplates() {
       setIsNew(false)
     },
     onError: () => toast.error('Save failed'),
+  })
+
+  const removeTemplate = useMutation({
+    mutationFn: (id: string) => imageTemplatesApi.remove(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['image-templates'] })
+      if (selectedId === idBeingDeleted) {
+        setSelectedId(null)
+        setIsNew(false)
+        setElements([])
+        setName('')
+        setLogoUrl(null)
+      }
+      toast.success('Template deleted')
+    },
+    onError: () => toast.error('Delete failed'),
   })
 
   // ── Element management ──────────────────────────────────────────────────────
@@ -762,20 +780,31 @@ export function SocialTemplates() {
                 </div>
               )
               : templates?.map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => loadTemplate(t)}
-                  className={`w-full text-left rounded-md px-2.5 py-2 text-xs transition-colors border ${
-                    selectedId === t.id && !isNew
-                      ? 'bg-primary/10 border-primary/30 text-primary'
-                      : 'border-transparent hover:bg-secondary text-foreground'
-                  }`}
-                >
-                  <p className="font-medium truncate">{t.name || 'Untitled'}</p>
-                  <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium mt-0.5 ${PLATFORM_CLASS[t.platform]}`}>
-                    {t.platform === 'FACEBOOK' ? 'Facebook' : 'Instagram'}
-                  </span>
-                </button>
+                <div key={t.id} className="group relative">
+                  <button
+                    onClick={() => loadTemplate(t)}
+                    className={`w-full text-left rounded-md px-2.5 py-2 text-xs transition-colors border ${
+                      selectedId === t.id && !isNew
+                        ? 'bg-primary/10 border-primary/30 text-primary'
+                        : 'border-transparent hover:bg-secondary text-foreground'
+                    }`}
+                  >
+                    <p className="font-medium truncate">{t.name || 'Untitled'}</p>
+                    <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-medium mt-0.5 ${PLATFORM_CLASS[t.platform]}`}>
+                      {t.platform === 'FACEBOOK' ? 'Facebook' : 'Instagram'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setIdBeingDeleted(t.id); removeTemplate.mutate(t.id) }}
+                    disabled={removeTemplate.isPending && idBeingDeleted === t.id}
+                    className="absolute top-1 right-1 h-6 w-6 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity hover:bg-destructive/10 text-muted-foreground hover:text-destructive"
+                    title="Delete template"
+                  >
+                    {removeTemplate.isPending && idBeingDeleted === t.id
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <Trash2 className="h-3 w-3" />}
+                  </button>
+                </div>
               ))
           }
           {isNew && (

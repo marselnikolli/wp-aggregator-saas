@@ -3,8 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Upload, Trash2, FileText,
   Loader2, ExternalLink, ChevronLeft, ChevronRight,
-  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles, Share2,
+  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles, Share2, Columns3,
 } from 'lucide-react'
+import { diffWords } from 'diff'
 import { formatDistanceToNow, format, sub } from 'date-fns'
 import { toast } from 'sonner'
 import { postsApi, sitesApi, sourcesApi, socialApi } from '@/lib/api'
@@ -27,6 +28,157 @@ const SOCIAL_TEMPLATES = [
   { value: 'text_link',    label: 'Text + Link'      },
   { value: 'image_overlay',label: 'Image Overlay'    },
 ] as const
+
+function SocialPostPreview({ post, template, caption }: { post: any; template: string; caption: string }) {
+  const img = post?.imageUrl
+  const title = post?.aiTitle ?? post?.title ?? ''
+  const domain = post?.originalUrl ? new URL(post.originalUrl).hostname.replace('www.', '') : post?.source?.name ?? 'example.com'
+  const platformName = 'SocialMedia'
+
+  const card = 'rounded-xl border border-border bg-card shadow-sm overflow-hidden max-w-sm w-full'
+  const textXs = 'text-xs text-muted-foreground'
+  if (template === 'photo_comment') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {img ? (
+          <img src={img} alt="" className="w-full aspect-[4/3] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        ) : (
+          <div className="w-full aspect-[4/3] bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+        )}
+        <div className="px-3 py-2.5 space-y-1.5">
+          <div className="flex gap-3 text-muted-foreground">
+            <span>❤</span><span>💬</span><span>↗</span>
+          </div>
+          {caption && <p className="text-xs whitespace-pre-wrap line-clamp-3">{caption}</p>}
+          <p className={textXs}>View 1 comment</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'link_post') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {caption && <p className="px-3 pb-2 text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>}
+        <div className="border-t border-border">
+          {img ? (
+            <img src={img} alt="" className="w-full aspect-[16/9] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <div className="w-full aspect-[16/9] bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+          )}
+          <div className="px-3 py-2 space-y-0.5 bg-muted/30">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{domain}</p>
+            <p className="text-xs font-semibold leading-snug line-clamp-2">{title}</p>
+            <p className={textXs}>Tap to read more</p>
+          </div>
+        </div>
+        <div className="flex gap-3 px-3 py-2 border-t border-border text-muted-foreground">
+          <span>❤</span><span>💬</span><span>↗</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'photo_only') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {img ? (
+          <img src={img} alt="" className="w-full aspect-square object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        ) : (
+          <div className="w-full aspect-square bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+        )}
+        <div className="px-3 py-2.5 space-y-1">
+          <div className="flex gap-3 text-muted-foreground">
+            <span>❤</span><span>💬</span><span>↗</span>
+          </div>
+          {caption && <p className="text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>}
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'text_link') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        <div className="px-3 pb-1 space-y-1">
+          <p className="text-sm font-semibold leading-snug">{title}</p>
+          <p className="text-xs whitespace-pre-wrap line-clamp-3">{caption || 'No caption'}</p>
+        </div>
+        <div className="px-3 pb-3">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 text-primary text-xs font-medium px-3 py-1.5">{domain} ↗</div>
+        </div>
+        <div className="flex gap-3 px-3 py-2 border-t border-border text-muted-foreground">
+          <span>❤</span><span>💬</span><span>↗</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'image_overlay') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        <div className="relative w-full aspect-[4/3]">
+          {img ? (
+            <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <div className="absolute inset-0 bg-muted" />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 p-4 space-y-1">
+            <p className="text-xs font-medium text-white/70 uppercase tracking-wide">{domain}</p>
+            <p className="text-sm font-bold text-white leading-snug line-clamp-3">{title}</p>
+            {caption && <p className="text-xs text-white/80 line-clamp-2">{caption}</p>}
+          </div>
+        </div>
+        <div className="flex gap-3 px-3 py-2 text-muted-foreground">
+          <span>❤</span><span>💬</span><span>↗</span>
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
 
 function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
   const [accountId,   setAccountId]   = useState('')
@@ -80,7 +232,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
@@ -125,14 +277,14 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
           </div>
 
           {accountId && (
-            <div className="grid gap-1.5">
+            <div className="grid gap-2">
               <Label className="text-xs flex items-center gap-1.5">
-                Caption preview
+                Live preview
                 {captionLoading && <Loader2 className="h-3 w-3 animate-spin" />}
               </Label>
-              <pre className="rounded-md border border-border bg-secondary/50 px-3 py-2.5 text-xs whitespace-pre-wrap min-h-[60px] text-foreground/80">
-                {captionLoading ? 'Loading…' : caption || 'No preview available'}
-              </pre>
+              <div className="flex justify-center">
+                <SocialPostPreview post={post} template={template} caption={caption} />
+              </div>
             </div>
           )}
 
@@ -297,6 +449,36 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
   )
 }
 
+function ContentDiffView({ original, rewritten }: { original: string; rewritten: string }) {
+  const diff = useMemo(() => diffWords(original, rewritten), [original, rewritten])
+  return (
+    <div className="rounded-md border border-border overflow-hidden">
+      <div className="grid grid-cols-2 divide-x divide-border text-xs">
+        <div className="p-3 space-y-1.5">
+          <p className="font-medium text-muted-foreground text-[11px] uppercase tracking-wide mb-2">Original</p>
+          <div className="leading-relaxed text-foreground/80">
+            {diff.filter(p => !p.added).map((p, i) =>
+              p.removed
+                ? <span key={i} className="bg-red-500/20 text-red-400 line-through rounded px-0.5">{p.value}</span>
+                : <span key={i}>{p.value}</span>
+            )}
+          </div>
+        </div>
+        <div className="p-3 space-y-1.5">
+          <p className="font-medium text-muted-foreground text-[11px] uppercase tracking-wide mb-2">AI Enhanced</p>
+          <div className="leading-relaxed text-foreground/80">
+            {diff.filter(p => !p.removed).map((p, i) =>
+              p.added
+                ? <span key={i} className="bg-emerald-500/20 text-emerald-400 rounded px-0.5">{p.value}</span>
+                : <span key={i}>{p.value}</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function ShortcutHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -335,6 +517,7 @@ export function Posts() {
   const [shortcutHelp,  setShortcutHelp]  = useState(false)
   const [bulkSiteId,    setBulkSiteId]    = useState('')
   const [bulkDialog,    setBulkDialog]    = useState(false)
+  const [diffView,      setDiffView]      = useState(false)
   const qc = useQueryClient()
 
   useEffect(() => { setPage(1); setCategory('') }, [sourceId])
@@ -598,6 +781,9 @@ export function Posts() {
                           {post.source?.name}
                           {post.categories?.length > 0 && <> · {post.categories.slice(0, 2).join(', ')}</>}
                           {' · '}{formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+                          {post.sourcePublishedAt && (
+                            <> · orig {format(new Date(post.sourcePublishedAt), 'dd MMM yyyy')}</>
+                          )}
                         </p>
                         {post.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs mt-0.5">Published</Badge>}
                       </div>
@@ -663,6 +849,12 @@ export function Posts() {
                   onClick={() => { setDraft({ title: selected.title ?? '', excerpt: selected.excerpt ?? '', content: selected.content ?? '' }); setEditMode(true) }}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
+                {selected.aiTitle && selected.aiTitle !== selected.title && (
+                  <Button size="icon" variant={diffView ? 'default' : 'ghost'} className="h-7 w-7 shrink-0"
+                    onClick={() => setDiffView(v => !v)} title="Toggle diff view">
+                    <Columns3 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
                 <Button size="sm" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
                   <Upload className="h-3 w-3 mr-1" />Publish
                 </Button>
@@ -681,20 +873,37 @@ export function Posts() {
           <div className="flex-1 overflow-y-auto px-5 py-4 pb-10">
             {!editMode && (
               <div className="space-y-3 mb-4">
-                {/* Featured image — full width, natural aspect ratio */}
-                {selected.imageUrl && (
-                  <img src={selected.imageUrl} alt=""
-                    className="w-full rounded-lg object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                )}
+                {diffView && selected.aiTitle ? (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Title diff</p>
+                      <ContentDiffView original={selected.title ?? ''} rewritten={selected.aiTitle} />
+                    </div>
+                    {selected.aiSummary && (
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Summary diff</p>
+                        <ContentDiffView original={selected.excerpt || selected.content?.slice(0, 500) || ''} rewritten={selected.aiSummary} />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    {/* Featured image — full width, natural aspect ratio */}
+                    {selected.imageUrl && (
+                      <img src={selected.imageUrl} alt=""
+                        className="w-full rounded-lg object-cover"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                    )}
 
-                {/* Title */}
-                <h1 className="text-base font-semibold leading-snug mt-2">
-                  {selected.aiTitle ?? selected.title}
-                  {selected.aiTitle && <Sparkles className="inline h-3.5 w-3.5 ml-1.5 text-violet-400" />}
-                </h1>
-                {selected.aiTitle && selected.aiTitle !== selected.title && (
-                  <p className="text-xs text-muted-foreground opacity-60 -mt-2">Original: {selected.title}</p>
+                    {/* Title */}
+                    <h1 className="text-base font-semibold leading-snug mt-2">
+                      {selected.aiTitle ?? selected.title}
+                      {selected.aiTitle && <Sparkles className="inline h-3.5 w-3.5 ml-1.5 text-violet-400" />}
+                    </h1>
+                    {selected.aiTitle && selected.aiTitle !== selected.title && (
+                      <p className="text-xs text-muted-foreground opacity-60 -mt-2">Original: {selected.title}</p>
+                    )}
+                  </>
                 )}
 
                 {/* Byline */}
@@ -703,6 +912,9 @@ export function Posts() {
                   {selected.author && <><span>·</span><span>{selected.author}</span></>}
                   <span>·</span>
                   <span>{format(new Date(selected.createdAt), 'dd MMM yyyy, HH:mm')}</span>
+                  {selected.sourcePublishedAt && (
+                    <><span>·</span><span className="text-amber-500/80">orig {format(new Date(selected.sourcePublishedAt), 'dd MMM yyyy')}</span></>
+                  )}
                   {selected.originalUrl && (() => {
                     try {
                       const domain = new URL(selected.originalUrl).hostname.replace(/^www\./, '')

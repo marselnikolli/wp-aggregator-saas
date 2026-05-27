@@ -68,6 +68,43 @@ export async function authRoutes(app: FastifyInstance) {
     })
   })
 
+  app.patch('/auth/me', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const jwt = req.user as { sub: string }
+    const body = z.object({
+      name:            z.string().optional(),
+      email:           z.string().email().optional(),
+      currentPassword: z.string().optional(),
+      newPassword:     z.string().min(6).optional(),
+    }).parse(req.body)
+
+    const user = await db.user.findUniqueOrThrow({ where: { id: jwt.sub } })
+    const update: Record<string, unknown> = {}
+
+    if (body.name !== undefined) update.name = body.name
+
+    if (body.email !== undefined && body.email !== user.email) {
+      const existing = await db.user.findUnique({ where: { email: body.email } })
+      if (existing) return reply.code(409).send({ error: 'Email already in use' })
+      if (!body.currentPassword) return reply.code(400).send({ error: 'Current password required to change email' })
+      if (!(await bcrypt.compare(body.currentPassword, user.password))) return reply.code(401).send({ error: 'Current password is incorrect' })
+      update.email = body.email
+    }
+
+    if (body.newPassword) {
+      if (!body.currentPassword) return reply.code(400).send({ error: 'Current password required to set new password' })
+      if (!(await bcrypt.compare(body.currentPassword, user.password))) return reply.code(401).send({ error: 'Current password is incorrect' })
+      update.password = await bcrypt.hash(body.newPassword, 10)
+    }
+
+    const updated = await db.user.update({
+      where: { id: jwt.sub },
+      data: update,
+      select: { id: true, email: true, name: true, role: true, totpEnabled: true },
+    })
+    audit('auth.me.update', { userId: jwt.sub, metadata: { fields: Object.keys(update) } })
+    return updated
+  })
+
   // --- TOTP 2FA routes ---
 
   app.post('/auth/totp/setup', { preHandler: [app.authenticate] }, async (req) => {

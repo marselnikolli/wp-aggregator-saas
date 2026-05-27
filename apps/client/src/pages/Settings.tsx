@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { formatDistanceToNow } from 'date-fns'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Badge } from '@/components/ui/badge'
 import { toast } from 'sonner'
-import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download, Monitor, ShieldCheck, Languages, Globe, HardDrive, Image, Rss, Copy, RefreshCw } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, Trash2, X as XIcon, Plus, Download, Monitor, ShieldCheck, Languages, Globe, HardDrive, Image, Rss, Copy, RefreshCw, MailWarning } from 'lucide-react'
 import { settingsApi, sitesApi, authApi, captionTemplatesApi } from '@/lib/api'
 import { Switch } from '@/components/ui/switch'
 
@@ -113,6 +113,13 @@ export function Settings() {
   const [fetchInterval, setFetchInterval] = useState<number | ''>('')
   const [webhookUrl, setWebhookUrl] = useState('')
   const [showWebhookLog, setShowWebhookLog] = useState(false)
+  const [brokenThreshold, setBrokenThreshold] = useState<number | null>(null)
+  const [smtpHost, setSmtpHost] = useState('')
+  const [smtpPort, setSmtpPort] = useState(587)
+  const [smtpUser, setSmtpUser] = useState('')
+  const [smtpPass, setSmtpPass] = useState('')
+  const [smtpFrom, setSmtpFrom] = useState('')
+  const [smtpTestEmail, setSmtpTestEmail] = useState('')
   const { data: webhookData } = useQuery<{ url: string }>({
     queryKey: ['webhook'],
     queryFn:  settingsApi.getWebhook,
@@ -123,10 +130,54 @@ export function Settings() {
     enabled:  showWebhookLog,
     refetchInterval: showWebhookLog ? 15_000 : false,
   })
+  const { data: thresholdData } = useQuery<{ threshold: number }>({
+    queryKey: ['broken-source-threshold'],
+    queryFn:  settingsApi.getBrokenSourceThreshold,
+  })
+  useEffect(() => {
+    if (thresholdData && brokenThreshold === null) setBrokenThreshold(thresholdData.threshold)
+  }, [thresholdData])
+  const { data: smtpData } = useQuery<{ host: string; port: number; userSet: boolean; from: string }>({
+    queryKey: ['smtp-settings'],
+    queryFn:  settingsApi.getSmtp,
+  })
+  useEffect(() => {
+    if (smtpData) {
+      setSmtpHost(smtpData.host)
+      setSmtpPort(smtpData.port)
+      setSmtpFrom(smtpData.from)
+    }
+  }, [smtpData])
   const saveWebhook = useMutation({
     mutationFn: (url: string) => settingsApi.saveWebhook(url),
     onSuccess:  () => { qc.invalidateQueries({ queryKey: ['webhook'] }); toast.success('Webhook saved') },
     onError:    () => toast.error('Failed to save webhook'),
+  })
+  const saveBrokenThreshold = useMutation({
+    mutationFn: (t: number) => settingsApi.saveBrokenSourceThreshold(t),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['broken-source-threshold'] }); toast.success('Alert threshold saved') },
+  })
+  const saveSmtp = useMutation({
+    mutationFn: () => settingsApi.saveSmtp({
+      host: smtpHost || undefined,
+      port: smtpPort || undefined,
+      user: smtpUser || undefined,
+      pass: smtpPass || undefined,
+      from: smtpFrom || undefined,
+    }),
+    onSuccess:  () => { qc.invalidateQueries({ queryKey: ['smtp-settings'] }); toast.success('SMTP settings saved') },
+  })
+  const testSmtp = useMutation({
+    mutationFn: () => settingsApi.testSmtp({
+      host: smtpHost,
+      port: smtpPort,
+      user: smtpUser || undefined,
+      pass: smtpPass || undefined,
+      from: smtpFrom,
+      to: smtpTestEmail || smtpFrom,
+    }),
+    onSuccess: (r: any) => r.ok ? toast.success('Test email sent!') : toast.error(r.error ?? 'Test failed'),
+    onError:   (e: any) => toast.error(e.response?.data?.error ?? 'Test failed'),
   })
 
   const [qualityThreshold, setQualityThreshold] = useState<number | ''>('')
@@ -386,8 +437,8 @@ export function Settings() {
   }
 
   return (
-    <div className="space-y-6 max-w-2xl p-6 h-full overflow-y-auto">
-      <div>
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-start p-6 h-full overflow-y-auto max-w-full">
+      <div className="col-span-full">
         <h1 className="text-2xl font-bold">Settings</h1>
         <div className="flex flex-wrap gap-2 mt-2">
           {[
@@ -407,7 +458,7 @@ export function Settings() {
         </div>
       </div>
 
-      <div id="ai" className="flex items-center gap-3 pt-1">
+      <div id="ai" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">AI &amp; Content</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -437,7 +488,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <div id="fetching" className="flex items-center gap-3 pt-1">
+      <div id="fetching" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sources &amp; Fetching</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -472,7 +523,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <div id="publishing" className="flex items-center gap-3 pt-1">
+      <div id="publishing" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Publishing</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -608,7 +659,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <div id="social" className="flex items-center gap-3 pt-1">
+      <div id="social" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Social Media</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -755,7 +806,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <div id="integrations" className="flex items-center gap-3 pt-1">
+      <div id="integrations" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Integrations</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -823,7 +874,85 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <div id="data" className="flex items-center gap-3 pt-1">
+      <div id="alerting" className="flex items-center gap-3 pt-1 col-span-full">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Alerting</span>
+        <div className="flex-1 h-px bg-border" />
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Broken Source Alerting</CardTitle>
+          <CardDescription>Configure when to fire alerts for sources that fail repeatedly</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Alert after N consecutive failures</Label>
+              <Input
+                type="number"
+                min={1}
+                max={100}
+                value={brokenThreshold ?? 3}
+                onChange={e => setBrokenThreshold(Number(e.target.value))}
+                className="text-sm"
+              />
+            </div>
+          </div>
+          <Button size="sm" disabled={saveBrokenThreshold.isPending}
+            onClick={() => saveBrokenThreshold.mutate(brokenThreshold ?? 3)}>
+            {saveBrokenThreshold.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+            Save Threshold
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2"><MailWarning className="h-4 w-4" />SMTP / Email</CardTitle>
+          <CardDescription>Configure outgoing email for notifications and alerts</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">SMTP Host</Label>
+              <Input value={smtpHost} onChange={e => setSmtpHost(e.target.value)} placeholder="smtp.example.com" className="text-sm font-mono" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">SMTP Port</Label>
+              <Input type="number" value={smtpPort} onChange={e => setSmtpPort(Number(e.target.value))} className="text-sm" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Username</Label>
+              <Input value={smtpUser} onChange={e => setSmtpUser(e.target.value)} placeholder="user@example.com" className="text-sm font-mono" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Password</Label>
+              <Input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)} placeholder="••••••••" className="text-sm font-mono" />
+            </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">From address</Label>
+            <Input value={smtpFrom} onChange={e => setSmtpFrom(e.target.value)} placeholder="alerts@example.com" className="text-sm font-mono" />
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" disabled={saveSmtp.isPending || !smtpHost || !smtpFrom}
+              onClick={() => saveSmtp.mutate()}>
+              {saveSmtp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+              Save SMTP
+            </Button>
+            <Input value={smtpTestEmail} onChange={e => setSmtpTestEmail(e.target.value)}
+              placeholder="Test recipient" className="text-sm flex-1" />
+            <Button size="sm" variant="outline" disabled={testSmtp.isPending || !smtpHost || !smtpFrom}
+              onClick={() => testSmtp.mutate()}>
+              {testSmtp.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Test'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <div id="data" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Data</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -855,7 +984,7 @@ export function Settings() {
         </CardContent>
       </Card>
 
-      <div id="security" className="flex items-center gap-3 pt-1">
+      <div id="security" className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Security</span>
         <div className="flex-1 h-px bg-border" />
       </div>
@@ -1236,7 +1365,7 @@ export function Settings() {
 
       <Separator />
 
-      <div className="flex items-center gap-3 pt-1">
+      <div className="flex items-center gap-3 pt-1 col-span-full">
         <span className="text-xs font-semibold uppercase tracking-wider text-destructive/70">Danger Zone</span>
         <div className="flex-1 h-px bg-destructive/20" />
       </div>

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users, GitBranch, History, Sun, Moon, Share2, UserCheck, ListVideo, BarChart2, LayoutTemplate } from 'lucide-react'
+import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users, GitBranch, History, Sun, Moon, Share2, UserCheck, ListVideo, BarChart2, LayoutTemplate, CopyCheck, User } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
@@ -15,6 +15,7 @@ const nav = [
   { to: '/posts',     label: 'Posts',     icon: FileText        },
   { to: '/pipelines', label: 'Pipelines', icon: GitBranch       },
   { to: '/history',   label: 'History',   icon: History         },
+  { to: '/dedup',     label: 'Duplicates',icon: CopyCheck       },
   { to: '/settings',  label: 'Settings',  icon: Settings        },
   { to: '/audit-log', label: 'Audit Log', icon: ShieldCheck     },
   { to: '/team',      label: 'Team',      icon: Users           },
@@ -181,6 +182,15 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {
           <p className="text-xs font-medium text-foreground truncate">{user?.name ?? user?.email}</p>
           <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
         </div>
+        <NavLink to="/account" onClick={onNavigate}
+          className={({ isActive }) => cn(
+            'flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors',
+            isActive && 'bg-secondary text-foreground'
+          )}
+        >
+          <User className="h-4 w-4 shrink-0" />
+          Account
+        </NavLink>
         <div className="flex gap-1">
           <button onClick={toggleTheme}
             className="flex flex-1 items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">

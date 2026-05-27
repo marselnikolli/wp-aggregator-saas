@@ -140,12 +140,30 @@ function cleanContent(html: string): string {
     })
   }
 
+  // Pass 9 — strip leading metadata (author bylines, datelines, site branding)
+  const META_PATTERNS = [
+    /^(autor|author|shkruan|nga|by|burimi|source|kategoria|category|dat[ëe]|date|published|updated|përditësuar|kontakt|email|website|site)\s*[:]/i,
+    /^(foto|photo|image|pictures?)\s*(:|nga|by|from)\s/i,
+    /^©\s*.+/i,
+    /^[A-Z][a-z]+ [A-Z][a-z]+(\s+[|–—-]\s+\d+[./]\d+)/,
+  ]
+  const TEXT_ELS = 'p, div, li, h1, h2, h3, h4, h5, h6'
+  for (let i = 0; i < 3; i++) {
+    const el = $(TEXT_ELS).first()
+    if (!el.length) break
+    const text = el.text().trim()
+    if (!text) { el.remove(); continue }
+    if (text.length > 120) break
+    if (META_PATTERNS.some(r => r.test(text))) { el.remove(); continue }
+    break
+  }
+
   let out = $('body').html() ?? ''
 
-  // Pass 9 — collapse 3+ consecutive <br> down to 2
+  // Pass 10 — collapse 3+ consecutive <br> down to 2
   out = out.replace(/(\s*<br\s*\/?>\s*){3,}/gi, '<br><br>')
 
-  // Pass 10 — strip WP block comments and shortcodes
+  // Pass 11 — strip WP block comments and shortcodes
   out = out.replace(/<!--\s*\/?wp:[^>]*-->/gi, '')
   out = out.replace(/\[[a-z_-]+[^\]]*\]/gi, '')          // [gallery], [caption id=...], etc.
   out = out.replace(/&nbsp;(\s*&nbsp;)+/g, ' ')           // repeated &nbsp; runs
@@ -157,6 +175,14 @@ export interface FetchJobData { sourceId: string }
 
 function basicAuthHeader(username: string, password: string): string {
   return 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
+}
+
+function parseDate(raw: string | null): Date | null {
+  if (!raw) return null
+  try {
+    const d = new Date(raw)
+    return isNaN(d.getTime()) ? null : d
+  } catch { return null }
 }
 
 async function fetchRss(endpoint: string, auth?: { username: string; password: string }) {
@@ -217,6 +243,7 @@ function mapRssItem(item: any) {
     originalUrl: item.link ?? null,
     author:      item.creator ?? null,
     categories:  item.categories ?? [],
+    sourcePublishedAt: item.isoDate ? new Date(item.isoDate) : item.pubDate ? new Date(item.pubDate) : null,
   }
 }
 
@@ -259,6 +286,7 @@ async function fetchWpApi(endpoint: string, auth?: { username: string; password:
       originalUrl: p.link ?? null,
       author:      (embedded['author']?.[0]?.name as string | undefined) ?? null,
       categories,
+      sourcePublishedAt: p.date ? new Date(p.date) : p.date_gmt ? new Date(p.date_gmt) : null,
     }
   })
 }
@@ -446,6 +474,7 @@ async function fetchCustomApi(source: {
           originalUrl: (get('originalUrl', 'url') as string | null) ?? null,
           author:      (get('author', 'author') as string | null) ?? null,
           categories:  [name],
+          sourcePublishedAt: parseDate(get('sourcePublishedAt', 'date') as string | null),
         })
         catCount++
       }
@@ -609,6 +638,7 @@ async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise
         sourceId: source.id, remoteId: item.remoteId, title: item.title,
         content: item.content, excerpt: item.excerpt, imageUrl: item.imageUrl,
         originalUrl: item.originalUrl, author: item.author, categories: item.categories, hash,
+        sourcePublishedAt: (item as any).sourcePublishedAt ?? null,
       },
     })
     // Language detection (sync, best-effort)
@@ -694,8 +724,10 @@ export function startFetchWorker() {
           data: { fetchStatus: 'ERROR', errorCount: { increment: 1 }, lastError: error.slice(0, 200) },
           select: { id: true, name: true, errorCount: true, endpoint: true },
         })
-        // Alert webhook every 3rd consecutive failure
-        if (updatedSource.errorCount % 3 === 0) {
+        // Alert on configurable consecutive failure threshold
+        const thresholdStr = await getSettingValue('broken_source_threshold').catch(() => null)
+        const threshold = thresholdStr ? parseInt(thresholdStr) : 3
+        if (updatedSource.errorCount >= 1 && updatedSource.errorCount % threshold === 0) {
           const webhookUrl = await getSettingValue('webhook_url').catch(() => null)
           if (webhookUrl) {
             fetch(webhookUrl, {
@@ -710,6 +742,8 @@ export function startFetchWorker() {
               }),
             }).catch(() => {})
           }
+          const { sendSourceBrokenAlert } = await import('../lib/email.js')
+          await sendSourceBrokenAlert(updatedSource.name, updatedSource.endpoint, error, updatedSource.errorCount)
         }
         throw err
       } finally {

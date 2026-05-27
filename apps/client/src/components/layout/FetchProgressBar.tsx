@@ -22,7 +22,7 @@ export function FetchProgressBar() {
       clearTimeout(clearTimers.current[d.sourceId])
       setActive(prev => ({
         ...prev,
-        [d.sourceId]: { pct: d.pct ?? 0, sourceName: d.sourceName ?? d.sourceId },
+        [d.sourceId]: { pct: d.progress?.pct ?? 0, sourceName: d.sourceName ?? d.sourceId },
       }))
     })
 

@@ -21,6 +21,7 @@ const pipelineSchema = z.object({
   sortOrder:          z.number().int().default(0),
   socialAccountId:    z.string().nullable().default(null),
   socialTemplate:     z.enum(['photo_comment', 'link_post', 'photo_only', 'text_link', 'image_overlay']).nullable().default(null),
+  languageSiteMapping: z.record(z.array(z.string())).nullable().default(null),
 })
 
 export async function pipelinesRoutes(app: FastifyInstance) {
@@ -30,7 +31,7 @@ export async function pipelinesRoutes(app: FastifyInstance) {
 
   app.post('/pipelines', { onRequest: [app.authenticate] }, async (req) => {
     const data = pipelineSchema.parse(req.body)
-    return db.pipeline.create({ data: { ...data, sourceFilter: data.sourceFilter ?? undefined, translateTo: data.translateTo ?? undefined, targetCategory: data.targetCategory ?? undefined, aiPrompt: data.aiPrompt ?? undefined, socialAccountId: data.socialAccountId ?? undefined, socialTemplate: data.socialTemplate ?? undefined } })
+    return db.pipeline.create({ data: { ...data, sourceFilter: data.sourceFilter ?? undefined, translateTo: data.translateTo ?? undefined, targetCategory: data.targetCategory ?? undefined, aiPrompt: data.aiPrompt ?? undefined, socialAccountId: data.socialAccountId ?? undefined, socialTemplate: data.socialTemplate ?? undefined, languageSiteMapping: data.languageSiteMapping ?? undefined } })
   })
 
   app.patch('/pipelines/:id', { onRequest: [app.authenticate] }, async (req) => {
@@ -44,8 +45,9 @@ export async function pipelinesRoutes(app: FastifyInstance) {
         translateTo:     data.translateTo    ?? undefined,
         targetCategory:  data.targetCategory ?? undefined,
         aiPrompt:        data.aiPrompt       ?? undefined,
-        socialAccountId: data.socialAccountId ?? undefined,
-        socialTemplate:  data.socialTemplate  ?? undefined,
+        socialAccountId:     data.socialAccountId     ?? undefined,
+        socialTemplate:      data.socialTemplate      ?? undefined,
+        languageSiteMapping: data.languageSiteMapping === null ? undefined : data.languageSiteMapping,
       },
     })
   })
@@ -75,19 +77,28 @@ export async function pipelinesRoutes(app: FastifyInstance) {
       where: filter as any,
       orderBy: { createdAt: 'desc' },
       take: 50,
-      select: { id: true },
+      select: { id: true, language: true },
     })
 
+    const languageSiteMapping = pipeline.languageSiteMapping as Record<string, string[]> | null
+
     const windowMs = pipeline.publishWindowHours > 0 ? pipeline.publishWindowHours * 60 * 60 * 1000 : 0
-    const total = posts.length * pipeline.siteIds.length
     let taskIndex = 0
     let queued = 0
 
     for (const post of posts) {
-      for (const siteId of pipeline.siteIds) {
+      let targetSiteIds: string[]
+      if (languageSiteMapping && Object.keys(languageSiteMapping).length > 0) {
+        const lang = post.language || 'en'
+        targetSiteIds = languageSiteMapping[lang] ?? languageSiteMapping['_default'] ?? pipeline.siteIds
+      } else {
+        targetSiteIds = pipeline.siteIds
+      }
+
+      for (const siteId of targetSiteIds) {
         const existing = await db.publishTask.findUnique({ where: { postId_siteId: { postId: post.id, siteId } } })
         if (existing) { taskIndex++; continue }
-        const delay = windowMs > 0 ? Math.round((taskIndex / total) * windowMs) : 0
+        const delay = windowMs > 0 ? Math.round((taskIndex / (posts.length * targetSiteIds.length)) * windowMs) : 0
         const task = await db.publishTask.create({
           data: {
             postId: post.id, siteId,

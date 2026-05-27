@@ -39,6 +39,56 @@ async function igPublishPhoto(igUserId: string, imageUrl: string, caption: strin
   return published.id
 }
 
+async function fetchPostInsights(socialPostId: string): Promise<void> {
+  try {
+    const record = await db.socialPost.findUnique({
+      where: { id: socialPostId },
+      include: { account: true },
+    })
+    if (!record?.platformPostId || !record?.account?.accessToken) return
+
+    const token = decrypt(record.account.accessToken)
+    const platform = record.platform
+
+    let reach = 0
+    let impressions = 0
+    let engagement = 0
+
+    if (platform === 'INSTAGRAM') {
+      const res = await fetch(
+        `https://graph.facebook.com/v19.0/${record.platformPostId}/insights?metric=impressions,reach,engagement&access_token=${token}`,
+      )
+      const data = await res.json() as any
+      if (!data.error && data.data) {
+        for (const metric of data.data) {
+          if (metric.name === 'impressions') impressions = metric.values?.[0]?.value ?? 0
+          if (metric.name === 'reach')      reach      = metric.values?.[0]?.value ?? 0
+          if (metric.name === 'engagement') engagement = metric.values?.[0]?.value ?? 0
+        }
+      }
+    } else {
+      const [reachRes, engagedRes] = await Promise.all([
+        fetch(`https://graph.facebook.com/v19.0/${record.platformPostId}/insights/post_impressions_unique?access_token=${token}`),
+        fetch(`https://graph.facebook.com/v19.0/${record.platformPostId}/insights/post_engaged_users?access_token=${token}`),
+      ])
+      const [reachData, engagedData] = await Promise.all([reachRes.json(), engagedRes.json()]) as [any, any]
+      if (!reachData.error)   reach      = reachData.data?.[0]?.values?.[0]?.value ?? 0
+      if (!engagedData.error) engagement = engagedData.data?.[0]?.values?.[0]?.value ?? 0
+      // Facebook impressions: use total_impressions_unique or post_impressions
+      const imprRes = await fetch(`https://graph.facebook.com/v19.0/${record.platformPostId}/insights/post_impressions?access_token=${token}`)
+      const imprData = await imprRes.json() as any
+      if (!imprData.error) impressions = imprData.data?.[0]?.values?.[0]?.value ?? 0
+    }
+
+    await db.socialPost.update({
+      where: { id: socialPostId },
+      data: { reach, impressions, engagement },
+    })
+  } catch {
+    // best-effort analytics fetch; insights may not be available immediately
+  }
+}
+
 async function processSocialPost(socialPostId: string): Promise<void> {
   const record = await db.socialPost.findUniqueOrThrow({
     where: { id: socialPostId },
@@ -175,6 +225,11 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       where: { id: socialPostId },
       data: { status: 'DONE', platformPostId: platformPostId ?? null, publishedAt: new Date() },
     })
+
+    // Schedule analytics fetch 5 minutes after publish (insights need time to generate)
+    if (platformPostId) {
+      setTimeout(() => fetchPostInsights(socialPostId).catch(() => {}), 5 * 60 * 1000)
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await db.socialPost.update({

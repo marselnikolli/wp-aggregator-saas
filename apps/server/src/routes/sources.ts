@@ -38,6 +38,7 @@ const sourceBody = z.object({
   endpoint: z.string().min(1),
   type:     z.enum(['RSS', 'WP_API', 'CUSTOM_API']).default('RSS'),
   enabled:  z.boolean().optional().default(true),
+  group:    z.string().optional(),
 })
 
 const sourceUpdateBody = z.object({
@@ -56,6 +57,7 @@ const sourceUpdateBody = z.object({
   userAgent:         z.string().nullable().optional(),
   proxyUrl:          z.string().nullable().optional(),
   categoryMap:       z.record(z.record(z.string())).nullable().optional(),
+  group:             z.string().optional(),
 })
 
 export async function sourcesRoutes(app: FastifyInstance) {
@@ -64,9 +66,12 @@ export async function sourcesRoutes(app: FastifyInstance) {
       page:     z.coerce.number().min(1).default(1),
       per_page: z.coerce.number().min(1).max(100).default(20),
       tag:      z.string().optional(),
+      group:    z.string().optional(),
     }).parse(req.query)
 
-    const where = query.tag ? { tags: { has: query.tag } } : undefined
+    const where: Record<string, unknown> = {}
+    if (query.tag)   where.tags  = { has: query.tag }
+    if (query.group) where.group = query.group
 
     const [total, items] = await Promise.all([
       db.source.count({ where }),
@@ -258,21 +263,27 @@ export async function sourcesRoutes(app: FastifyInstance) {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`)
     }
 
+    async function withSourceName(sourceId: string, extra: Record<string, unknown> = {}) {
+      let sourceName = sourceId
+      try { const s = await db.source.findUnique({ where: { id: sourceId }, select: { name: true } }); if (s) sourceName = s.name } catch {}
+      return { ...extra, sourceId, sourceName }
+    }
+
     async function onActive({ jobId }: { jobId: string }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:active', sourceId: job.data.sourceId, jobId })
+      if (job?.data?.sourceId) send({ type: 'job:active', ...(await withSourceName(job.data.sourceId)), jobId })
     }
     async function onCompleted({ jobId }: { jobId: string }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:completed', sourceId: job.data.sourceId })
+      if (job?.data?.sourceId) send({ type: 'job:completed', ...(await withSourceName(job.data.sourceId)) })
     }
     async function onFailed({ jobId, failedReason }: { jobId: string; failedReason: string }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:failed', sourceId: job.data.sourceId, error: failedReason })
+      if (job?.data?.sourceId) send({ type: 'job:failed', ...(await withSourceName(job.data.sourceId)), error: failedReason })
     }
     async function onProgress({ jobId, data }: { jobId: string; data: unknown }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:progress', sourceId: job.data.sourceId, progress: data })
+      if (job?.data?.sourceId) send({ type: 'job:progress', ...(await withSourceName(job.data.sourceId)), progress: data })
     }
 
     fetchQueueEvents.on('active',    onActive)

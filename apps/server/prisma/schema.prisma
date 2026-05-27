@@ -69,6 +69,7 @@ model Source {
   categoryMappings  Json?
   paginationParam   String?
   tags              String[]         @default([])
+  group             String?
   minDelaySec       Int              @default(1)
   userAgent         String?
   proxyUrl          String?
@@ -106,6 +107,7 @@ model AggregatedPost {
   publishStatus  PublishStatus  @default(DRAFT)
   scheduledDate  DateTime?
   publishedDate  DateTime?
+  sourcePublishedAt DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   publishTasks   PublishTask[]
@@ -207,6 +209,7 @@ model Pipeline {
   sortOrder            Int      @default(0)
   socialAccountId      String?
   socialTemplate       String?
+  languageSiteMapping  Json?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

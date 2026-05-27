@@ -33,6 +33,7 @@ export const FIELD_GUESS_MAP: Record<string, string[]> = {
   originalUrl: ['url', 'link', 'permalink', 'href', 'article_url'],
   remoteId:    ['id', 'post_id', 'article_id', 'nid', 'entry_id'],
   author:      ['author', 'writer', 'journalist', 'autori', 'byline'],
+  sourcePublishedAt: ['date', 'pubDate', 'published', 'created_at', 'createdAt', 'published_at', 'publishedAt', 'date_gmt', 'isoDate'],
 }
 
 export function parseHtmlItems(html: string): Record<string, unknown>[] {

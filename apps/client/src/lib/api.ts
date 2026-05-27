@@ -60,6 +60,7 @@ export const postsApi = {
   update:  (id: string, d: any) => api.patch(`/posts/${id}`, d).then(r => r.data),
   publishTasks:     (p?: any) => api.get('/publish-tasks', { params: p }).then(r => r.data),
   retryPublishTask: (id: string) => api.post(`/publish-tasks/${id}/retry`).then(r => r.data),
+  bulkRefetchImages: (sourceId?: string) => api.post('/posts/bulk-refetch-images', { sourceId }).then(r => r.data),
 }
 
 export const dashboardApi = {
@@ -92,7 +93,12 @@ export const settingsApi = {
   revokeFeedToken:      () => api.delete('/settings/feed-token'),
   exportData:           () => api.get('/settings/export', { responseType: 'blob' }).then(r => r.data),
   importData:       (data: any) => api.post('/settings/import', data).then(r => r.data),
-  getWebhook:           () => api.get('/settings/webhook').then(r => r.data),
+  getWebhook:               () => api.get('/settings/webhook').then(r => r.data),
+  getBrokenSourceThreshold: () => api.get('/settings/broken-source-threshold').then(r => r.data),
+  saveBrokenSourceThreshold: (threshold: number) => api.post('/settings/broken-source-threshold', { threshold }),
+  getSmtp:                  () => api.get('/settings/smtp').then(r => r.data),
+  saveSmtp:                 (d: any) => api.post('/settings/smtp', d),
+  testSmtp:                 (d: any) => api.post('/settings/smtp/test', d).then(r => r.data),
   saveWebhook:          (url: string) => api.post('/settings/webhook', { url }),
   getWebhookLog:        () => api.get('/settings/webhook-log').then(r => r.data),
   getScheduledPublish:  () => api.get('/settings/scheduled-publish').then(r => r.data),
@@ -119,6 +125,7 @@ export const authApi = {
   setupTotp:     () => api.post('/auth/totp/setup').then(r => r.data),
   enableTotp:    (code: string) => api.post('/auth/totp/enable', { code }).then(r => r.data),
   disableTotp:   (code: string) => api.post('/auth/totp/disable', { code }).then(r => r.data),
+  updateMe:      (d: any) => api.patch('/auth/me', d).then(r => r.data),
 }
 
 export const apiKeysApi = {
@@ -158,6 +165,11 @@ export const imageTemplatesApi = {
     api.post(`/image-templates/${id}/logo`, { logoBase64, mimeType }).then(r => r.data),
   preview:    (id: string, postId: string) =>
     api.post(`/image-templates/${id}/preview`, { postId }, { responseType: 'blob' }).then(r => r.data),
+}
+
+export const dedupApi = {
+  list:        (p?: any) => api.get('/dedup', { params: p }).then(r => r.data),
+  markUnique:  (id: string) => api.post(`/dedup/${id}/mark-unique`).then(r => r.data),
 }
 
 export const socialApi = {
