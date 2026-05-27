@@ -18,44 +18,44 @@
 
 ## Backlog
 
-### [ ] Responsive dashboard trending section
+### [x] Responsive dashboard trending section
 
 The trending/duplicate clusters section on the dashboard should display in a responsive grid, max 6 items per row, collapsing gracefully on smaller screens.
 
-### [ ] Social media template preview
+### [x] Social media template preview
 
 Refine the social media caption/image templates. When an editor selects a template in the share dialog, show a live preview of how the post will look on that platform before sharing.
 
-### [ ] Content cleanup pipeline
+### [x] Content cleanup pipeline
 
 Strip extraneous metadata (author bylines, timestamps, site branding) from the beginning of scraped post content — e.g. articles from Oranews start with "Autor: ... Data: ..." that should be cleaned automatically.
 
-### [ ] Show original publish date on posts
+### [x] Show original publish date on posts
 
 Display the original article publication date (from the source website) alongside the aggregated date, so editors can see when the content was originally published.
 
-### [ ] Social template deletion
+### [x] Social template deletion
 
 Add a delete button/option for social media caption templates and image templates in the templates management UI.
 
-### [ ] Manual source grouping / categories
+### [x] Manual source grouping / categories
 
 Allow users to create custom groups/categories on the Sources page to organize sources manually (e.g. "Politics", "Sports", "Technology"), with filtering and bulk actions per group.
 
-### [ ] Pipeline workflow visualization
+### [x] Pipeline workflow visualization
 
 Add a workflow animation/diagram for pipeline execution (similar to n8n) showing the live state of each stage — fetch → summarize → translate → publish — so users can see where in the process a pipeline currently is.
 
-### [ ] Real social media analytics
+### [x] Real social media analytics
 
 Investigate if there is a direct API integration with Facebook/Instagram to pull real analytics (reach, impressions, engagement) instead of relying on manual entry or placeholder data.
 let me know if this is possible if not already avaliable.
 
-### [ ] Settings page full-width layout
+### [x] Settings page full-width layout
 
 Redesign the Settings page to use the full page width, with responsive multi-column grouping for related settings sections instead of the current single-column card layout.
 
-### [ ] Fetch progress bar
+### [x] Fetch progress bar
 
 Implement a visible progress bar that tracks the status of source fetching (there's already a `FetchProgressBar` component). Ensure it actually reflects real-time job progress from the BullMQ queue events.
 
