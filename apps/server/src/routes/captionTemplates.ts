@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { db } from '../db.js'
 
@@ -19,15 +20,22 @@ export async function captionTemplatesRoutes(app: FastifyInstance) {
   })
 
   app.post('/caption-templates', { preHandler: [app.authenticate] }, async (req, reply) => {
-    const body = templateBody.parse(req.body)
-    const template = await db.captionTemplate.create({ data: body })
+    const { categoryColors, ...rest } = templateBody.parse(req.body)
+    const template = await db.captionTemplate.create({
+      data: {
+        ...rest,
+        categoryColors: categoryColors ?? Prisma.JsonNull,
+      },
+    })
     return reply.code(201).send(template)
   })
 
   app.patch('/caption-templates/:id', { preHandler: [app.authenticate] }, async (req) => {
     const { id } = req.params as { id: string }
-    const body = templateBody.partial().parse(req.body)
-    return db.captionTemplate.update({ where: { id }, data: body })
+    const { categoryColors, ...rest } = templateBody.partial().parse(req.body)
+    const data: Prisma.CaptionTemplateUpdateInput = { ...rest }
+    if (categoryColors !== undefined) data.categoryColors = categoryColors ?? Prisma.JsonNull
+    return db.captionTemplate.update({ where: { id }, data })
   })
 
   app.delete('/caption-templates/:id', { preHandler: [app.authenticate] }, async (req, reply) => {

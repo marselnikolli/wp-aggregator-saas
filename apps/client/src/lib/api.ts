@@ -143,23 +143,38 @@ export const usersApi = {
 }
 
 export const captionTemplatesApi = {
-  list:   () => api.get('/caption-templates').then(r => r.data),
-  create: (data: any) => api.post('/caption-templates', data).then(r => r.data),
-  update: (id: string, data: any) => api.patch(`/caption-templates/${id}`, data).then(r => r.data),
-  remove: (id: string) => api.delete(`/caption-templates/${id}`),
+  list:   () => api.get('/social/caption-templates').then(r => r.data),
+  create: (data: any) => api.post('/social/caption-templates', data).then(r => r.data),
+  update: (id: string, data: any) => api.patch(`/social/caption-templates/${id}`, data).then(r => r.data),
+  remove: (id: string) => api.delete(`/social/caption-templates/${id}`),
+}
+
+export const imageTemplatesApi = {
+  list:       () => api.get('/image-templates').then(r => r.data),
+  create:     (data: any) => api.post('/image-templates', data).then(r => r.data),
+  update:     (id: string, data: any) => api.patch(`/image-templates/${id}`, data).then(r => r.data),
+  remove:     (id: string) => api.delete(`/image-templates/${id}`),
+  uploadLogo: (id: string, logoBase64: string, mimeType: string) =>
+    api.post(`/image-templates/${id}/logo`, { logoBase64, mimeType }).then(r => r.data),
+  preview:    (id: string, postId: string) =>
+    api.post(`/image-templates/${id}/preview`, { postId }, { responseType: 'blob' }).then(r => r.data),
 }
 
 export const socialApi = {
   accounts:       () => api.get('/social-accounts').then(r => r.data),
-  createAccount:  (data: any) => api.post('/social-accounts', data).then(r => r.data),
+  discoverPages:  (data: { appId: string; appSecret: string; shortLivedToken: string }) =>
+    api.post('/social-accounts/discover', data).then(r => r.data),
+  createAccountBatch: (data: any) => api.post('/social-accounts/batch', data).then(r => r.data),
   updateAccount:  (id: string, data: any) => api.patch(`/social-accounts/${id}`, data).then(r => r.data),
   deleteAccount:  (id: string) => api.delete(`/social-accounts/${id}`),
   testAccount:    (id: string) => api.post(`/social-accounts/${id}/test`).then(r => r.data),
+  rotateToken:    (id: string) => api.post(`/social-accounts/${id}/rotate`).then(r => r.data),
   publish:        (data: any) => api.post('/social/publish', data).then(r => r.data),
   history:        (params?: any) => api.get('/social/history', { params }).then(r => r.data),
   retryPost:      (id: string) => api.post(`/social/history/${id}/retry`).then(r => r.data),
   cancelPost:     (id: string) => api.delete(`/social/history/${id}`),
   analytics:      () => api.get('/social/analytics').then(r => r.data),
+  analyticsTop:   () => api.get('/social/analytics/top').then(r => r.data),
   previewCaption: (postId: string, accountId: string, template: string) =>
     api.post('/social/preview-caption', { postId, accountId, template }).then(r => r.data),
 }

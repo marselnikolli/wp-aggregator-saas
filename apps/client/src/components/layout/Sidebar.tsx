@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users, GitBranch, History, Sun, Moon, Share2, UserCheck, ListVideo, BarChart2 } from 'lucide-react'
+import { LayoutDashboard, Globe, Rss, FileText, Settings, Zap, LogOut, Activity, ChevronDown, ChevronUp, ExternalLink, ShieldCheck, Users, GitBranch, History, Sun, Moon, Share2, UserCheck, ListVideo, BarChart2, LayoutTemplate } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Separator } from '@/components/ui/separator'
 import { useAuth } from '@/context/AuthContext'
@@ -21,9 +21,10 @@ const nav = [
 ]
 
 const socialNav = [
-  { to: '/social/accounts',  label: 'Accounts',  icon: UserCheck  },
-  { to: '/social/queue',     label: 'Queue',     icon: ListVideo  },
-  { to: '/social/analytics', label: 'Analytics', icon: BarChart2  },
+  { to: '/social/accounts',   label: 'Accounts',  icon: UserCheck       },
+  { to: '/social/queue',      label: 'Queue',     icon: ListVideo       },
+  { to: '/social/analytics',  label: 'Analytics', icon: BarChart2       },
+  { to: '/social/templates',  label: 'Templates', icon: LayoutTemplate  },
 ]
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void } = {}) {

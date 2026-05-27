@@ -12,9 +12,10 @@ import { AuditLog }  from '@/pages/AuditLog'
 import { Team }      from '@/pages/Team'
 import { Pipelines }      from '@/pages/Pipelines'
 import { PublishHistory } from '@/pages/PublishHistory'
-import { SocialAccounts } from '@/pages/social/SocialAccounts'
-import { SocialQueue }    from '@/pages/social/SocialQueue'
+import { SocialAccounts }  from '@/pages/social/SocialAccounts'
+import { SocialQueue }     from '@/pages/social/SocialQueue'
 import { SocialAnalytics } from '@/pages/social/SocialAnalytics'
+import { SocialTemplates } from '@/pages/social/SocialTemplates'
 import { Login }     from '@/pages/Login'
 import { Skeleton }  from '@/components/ui/skeleton'
 
@@ -55,9 +56,10 @@ function AppRoutes() {
         <Route path="team"       element={<Team />} />
         <Route path="pipelines"     element={<Pipelines />} />
         <Route path="history"       element={<PublishHistory />} />
-        <Route path="social/accounts"  element={<SocialAccounts />} />
-        <Route path="social/queue"     element={<SocialQueue />} />
-        <Route path="social/analytics" element={<SocialAnalytics />} />
+        <Route path="social/accounts"   element={<SocialAccounts />} />
+        <Route path="social/queue"      element={<SocialQueue />} />
+        <Route path="social/analytics"  element={<SocialAnalytics />} />
+        <Route path="social/templates"  element={<SocialTemplates />} />
         <Route path="social" element={<Navigate to="/social/accounts" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />

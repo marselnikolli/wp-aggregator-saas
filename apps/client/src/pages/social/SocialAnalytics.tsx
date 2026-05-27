@@ -39,7 +39,7 @@ export function SocialAnalytics() {
 
   const { data: topData, isLoading: topLoading } = useQuery({
     queryKey: ['social-analytics-top'],
-    queryFn:  () => socialApi.history({ limit: 10, status: 'DONE' }),
+    queryFn:  socialApi.analyticsTop,
   })
 
   if (isLoading) return (
@@ -169,16 +169,16 @@ export function SocialAnalytics() {
       {/* Top posts */}
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Recent Posts</CardTitle>
+          <CardTitle className="text-base">Top Posts by Engagement</CardTitle>
         </CardHeader>
         <CardContent>
           {topLoading ? (
             <div className="space-y-2">{[...Array(5)].map((_, i) => <Skeleton key={i} className="h-10" />)}</div>
-          ) : !topData?.items?.length ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">No published posts yet</p>
+          ) : !(topData as any[])?.length ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">No engagement data yet</p>
           ) : (
             <div className="space-y-2">
-              {topData.items.map((post: any) => (
+              {(topData as any[]).map((post: any) => (
                 <div key={post.id} className="flex items-center justify-between gap-3 text-sm py-1.5 border-b border-border/50 last:border-0">
                   <p className="truncate text-foreground flex-1">{post.post?.title ?? '—'}</p>
                   <div className="flex items-center gap-2 shrink-0">

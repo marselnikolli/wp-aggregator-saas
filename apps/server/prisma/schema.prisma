@@ -256,17 +256,25 @@ enum SocialStatus {
 }
 
 model SocialAccount {
-  id          String         @id @default(cuid())
-  name        String
-  platform    SocialPlatform
-  pageId      String
-  accessToken String
-  siteId      String?
-  site        Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  enabled     Boolean        @default(true)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  socialPosts SocialPost[]
+  id                 String          @id @default(cuid())
+  name               String
+  platform           SocialPlatform
+  pageId             String
+  accessToken        String
+  appId              String?
+  appSecret          String?
+  longLivedUserToken String?
+  lastRotation       DateTime?
+  rotationDays       Int             @default(50)
+  linkedAccountId    String?
+  linkedAccount      SocialAccount?  @relation("AccountLink", fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  linkedAccounts     SocialAccount[] @relation("AccountLink")
+  siteId             String?
+  site               Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  enabled            Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  socialPosts        SocialPost[]
 }
 
 model SocialPost {
@@ -304,4 +312,14 @@ model CaptionTemplate {
   emojiStyle      String         @default("category")
   categoryColors  Json?
   createdAt       DateTime       @default(now())
+}
+
+model ImageTemplate {
+  id        String         @id @default(cuid())
+  name      String
+  platform  SocialPlatform
+  elements  Json           // TemplateElement[] (see below)
+  logoUrl   String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 }
