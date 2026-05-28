@@ -3,6 +3,7 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
+      TZ: Europe/Tirane
       POSTGRES_USER: aggregator
       POSTGRES_PASSWORD: aggregator
       POSTGRES_DB: aggregator
@@ -32,6 +33,7 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
+      TZ: Europe/Tirane
       DATABASE_URL: postgresql://aggregator:aggregator@postgres:5432/aggregator
       REDIS_URL: redis://redis:6379
       JWT_SECRET: super-secret-jwt-key-change-in-production
@@ -55,6 +57,7 @@ services:
     restart: unless-stopped
     command: node dist/worker-runner.js
     environment:
+      TZ: Europe/Tirane
       DATABASE_URL: postgresql://aggregator:aggregator@postgres:5432/aggregator
       REDIS_URL: redis://redis:6379
       JWT_SECRET: super-secret-jwt-key-change-in-production

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Upload, Trash2, FileText,
   Loader2, ExternalLink, ChevronLeft, ChevronRight,
-  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles, Share2, Columns3,
+  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles, Share2, Columns3, Globe,
 } from 'lucide-react'
 import { diffWords } from 'diff'
 import { formatDistanceToNow, format, sub } from 'date-fns'
@@ -22,11 +22,11 @@ import { RichTextEditor } from '@/components/RichTextEditor'
 const PER_PAGE = [10, 25, 50, 100] as const
 
 const SOCIAL_TEMPLATES = [
-  { value: 'photo_comment', label: 'Photo + Comment' },
-  { value: 'link_post',     label: 'Link Post'       },
-  { value: 'photo_only',   label: 'Photo Only'       },
-  { value: 'text_link',    label: 'Text + Link'      },
-  { value: 'image_overlay',label: 'Image Overlay'    },
+  { value: 'photo_comment', label: 'Photo + Comment', needsSite: true  },
+  { value: 'link_post',     label: 'Link Post',       needsSite: true  },
+  { value: 'photo_only',   label: 'Photo Only',       needsSite: false },
+  { value: 'text_link',    label: 'Text + Link',      needsSite: true  },
+  { value: 'image_overlay',label: 'Image Overlay',    needsSite: false },
 ] as const
 
 function SocialPostPreview({ post, template, caption }: { post: any; template: string; caption: string }) {
@@ -48,17 +48,29 @@ function SocialPostPreview({ post, template, caption }: { post: any; template: s
           </div>
           <div className="text-muted-foreground">···</div>
         </div>
-        {img ? (
-          <img src={img} alt="" className="w-full aspect-[4/3] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-        ) : (
-          <div className="w-full aspect-[4/3] bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
-        )}
+        <div className="relative w-full aspect-[4/3] bg-muted overflow-hidden">
+          {img
+            ? <img src={img} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            : <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No image</div>
+          }
+          {/* Bottom banner */}
+          <div className="absolute bottom-0 left-0 right-0 h-10 bg-black/90 flex items-center justify-center">
+            <span className="text-white text-[11px] font-bold tracking-widest uppercase">
+              LINKUN NËR KOMENTIN E PARË 👇
+            </span>
+          </div>
+        </div>
         <div className="px-3 py-2.5 space-y-1.5">
           <div className="flex gap-3 text-muted-foreground">
             <span>❤</span><span>💬</span><span>↗</span>
           </div>
-          {caption && <p className="text-xs whitespace-pre-wrap line-clamp-3">{caption}</p>}
           <p className={textXs}>View 1 comment</p>
+          {caption && (
+            <div className="border-t border-border pt-1.5">
+              <p className="text-[10px] text-muted-foreground font-semibold mb-0.5">First comment:</p>
+              <p className="text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>
+            </div>
+          )}
         </div>
       </div>
     )
@@ -194,6 +206,25 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
     queryFn:  socialApi.accounts,
   })
 
+  const selectedAccount = (accounts ?? []).find((a: any) => a.id === accountId)
+  const hasSite = !!selectedAccount?.siteId
+  const availableTemplates = SOCIAL_TEMPLATES.filter(t => !t.needsSite || hasSite)
+
+  const isPublishedToAccountSite = selectedAccount?.siteId
+    ? post?.publishTasks?.some((t: any) => t.site?.id === selectedAccount.siteId)
+    : false
+
+  const destinationUrl = selectedAccount?.siteId
+    ? post?.publishTasks?.find((t: any) => t.site?.id === selectedAccount.siteId)?.wpUrl
+    : null
+
+  // Auto-switch to an image-only template when selected account has no linked site
+  useEffect(() => {
+    if (!accountId) return
+    const valid = availableTemplates.find(t => t.value === template)
+    if (!valid) setTemplate('photo_only')
+  }, [accountId, hasSite]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!accountId || !template || !post?.id) return
     let cancelled = false
@@ -230,12 +261,26 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
     }
   }
 
+  const canShare = !!selectedAccount && !!selectedAccount.siteId && isPublishedToAccountSite && !publishing
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
+
+          {/* Destination URL info */}
+          {post?.publishTasks?.length > 0 && (
+            <div className="rounded-md border border-teal-500/30 bg-teal-500/5 px-3 py-2">
+              <p className="text-xs text-teal-400 font-medium mb-0.5">Published to destination site</p>
+              {post.publishTasks.map((t: any) => (
+                <p key={t.site?.id ?? t.wpUrl} className="text-xs text-muted-foreground truncate">
+                  {t.site?.name}: {t.wpUrl}
+                </p>
+              ))}
+            </div>
+          )}
 
           <div className="grid gap-1.5">
             <Label className="text-xs">Account</Label>
@@ -251,6 +296,41 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
             </select>
           </div>
 
+          {/* Not published warning */}
+          {accountId && selectedAccount?.siteId && !isPublishedToAccountSite && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <p className="text-xs text-amber-400 font-medium">
+                Post not published to {selectedAccount.name}'s destination site
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Publish this post to the linked website before sharing to social media.
+              </p>
+            </div>
+          )}
+
+          {/* No site linked warning */}
+          {accountId && selectedAccount && !selectedAccount.siteId && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+              <p className="text-xs text-destructive font-medium">
+                No destination site linked
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                This social account must be linked to a destination site before sharing.
+                Edit the account settings to add a site link.
+              </p>
+            </div>
+          )}
+
+          {/* Destination URL for selected account */}
+          {accountId && destinationUrl && (
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Destination URL being shared</Label>
+              <p className="text-xs text-muted-foreground truncate bg-secondary/50 rounded px-2 py-1.5 border border-border">
+                {destinationUrl}
+              </p>
+            </div>
+          )}
+
           <div className="grid gap-1.5">
             <Label className="text-xs">Template</Label>
             <select
@@ -258,10 +338,16 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
               onChange={e => setTemplate(e.target.value)}
               className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
-              {SOCIAL_TEMPLATES.map(t => (
+              {availableTemplates.map(t => (
                 <option key={t.value} value={t.value}>{t.label}</option>
               ))}
             </select>
+            {accountId && !hasSite && (
+              <p className="text-xs text-muted-foreground">
+                Link templates unavailable — no website linked to this account.
+                Only image templates are shown.
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5">
@@ -296,7 +382,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={handlePublish} disabled={!accountId || publishing}>
+          <Button onClick={handlePublish} disabled={!canShare}>
             {publishing && <Loader2 className="animate-spin" />}
             {scheduledAt ? 'Schedule' : 'Share now'}
           </Button>
@@ -307,11 +393,14 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 }
 
 const DATE_PRESETS = [
-  { label: 'All time',      days: 0  },
-  { label: 'Today',         days: 1  },
-  { label: 'Last 7 days',   days: 7  },
-  { label: 'Last 30 days',  days: 30 },
-  { label: 'Last 3 months', days: 90 },
+  { label: 'All time',      value: '',     diff: { days: 0 }     },
+  { label: 'Last hour',     value: '1h',   diff: { hours: 1 }    },
+  { label: 'Last 2 hours',  value: '2h',   diff: { hours: 2 }    },
+  { label: 'Last 6 hours',  value: '6h',   diff: { hours: 6 }    },
+  { label: 'Today',         value: '1d',   diff: { days: 1 }     },
+  { label: 'Last 7 days',   value: '7d',   diff: { days: 7 }     },
+  { label: 'Last 30 days',  value: '30d',  diff: { days: 30 }    },
+  { label: 'Last 3 months', value: '90d',  diff: { days: 90 }    },
 ]
 
 const SHORTCUTS = [
@@ -320,9 +409,11 @@ const SHORTCUTS = [
   { key: 'Esc',   desc: 'Cancel / clear' },
 ]
 
-function dateFromPreset(days: number) {
-  if (!days) return ''
-  return sub(new Date(), { days }).toISOString()
+function dateFromPreset(value: string) {
+  if (!value) return ''
+  const preset = DATE_PRESETS.find(p => p.value === value)
+  if (!preset) return ''
+  return sub(new Date(), preset.diff).toISOString()
 }
 
 const WP_STATUS_OPTIONS = [
@@ -502,7 +593,7 @@ export function Posts() {
   const [perPage,       setPerPage]       = useState(25)
   const [sourceId,      setSourceId]      = useState('')
   const [category,      setCategory]      = useState('')
-  const [dateDays,      setDateDays]      = useState(0)
+  const [datePreset,    setDatePreset]    = useState('')
   const [searchInput,   setSearchInput]   = useState('')
   const [search,        setSearch]        = useState('')
   const [language,      setLanguage]      = useState('')
@@ -518,10 +609,11 @@ export function Posts() {
   const [bulkSiteId,    setBulkSiteId]    = useState('')
   const [bulkDialog,    setBulkDialog]    = useState(false)
   const [diffView,      setDiffView]      = useState(false)
+  const [publishStatus, setPublishStatus] = useState('')
   const qc = useQueryClient()
 
   useEffect(() => { setPage(1); setCategory('') }, [sourceId])
-  useEffect(() => { setPage(1) }, [category, dateDays, perPage, search, language])
+  useEffect(() => { setPage(1) }, [category, datePreset, perPage, search, language, publishStatus])
 
   // Debounce search input
   useEffect(() => {
@@ -531,7 +623,7 @@ export function Posts() {
   useEffect(() => { setCheckedIds(new Set()) }, [page])
   useEffect(() => { setEditMode(false); setLocalCats(null); setCatInput('') }, [selected?.id])
 
-  const dateFrom = useMemo(() => dateFromPreset(dateDays), [dateDays])
+  const dateFrom = useMemo(() => dateFromPreset(datePreset), [datePreset])
 
   const { data: languagesData } = useQuery({
     queryKey: ['post-languages'],
@@ -540,7 +632,7 @@ export function Posts() {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['posts', page, perPage, sourceId, category, dateDays, search, language],
+    queryKey: ['posts', page, perPage, sourceId, category, datePreset, search, language, publishStatus],
     queryFn: () => postsApi.list({
       page,
       per_page: perPage,
@@ -549,6 +641,7 @@ export function Posts() {
       ...(dateFrom && { dateFrom }),
       ...(search   && { search }),
       ...(language && { language }),
+      ...(publishStatus && { publishStatus }),
     }),
     placeholderData: (prev: any) => prev,
     refetchInterval: 15_000,
@@ -700,19 +793,39 @@ export function Posts() {
               <option value="">{sourceId ? 'All categories' : 'Pick source first'}</option>
               {(categories ?? []).map((c: string) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={dateDays} onChange={e => setDateDays(Number(e.target.value))}
+            <select value={datePreset} onChange={e => setDatePreset(e.target.value)}
               className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
-              {DATE_PRESETS.map(p => <option key={p.days} value={p.days}>{p.label}</option>)}
+              {DATE_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
             {languagesData?.length > 0 && (
               <select value={language} onChange={e => { setLanguage(e.target.value); setPage(1) }}
                 className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
                 <option value="">All langs</option>
-                {languagesData.map((l: { code: string; count: number }) => (
-                  <option key={l.code} value={l.code}>{l.code} ({l.count})</option>
-                ))}
+                {languagesData
+                  .filter((l: { code: string }) => ['sq', 'en', 'it', 'es'].includes(l.code))
+                  .map((l: { code: string; count: number }) => (
+                    <option key={l.code} value={l.code}>{l.code} ({l.count})</option>
+                  ))}
               </select>
             )}
+          </div>
+          {/* Publish status filter tabs */}
+          <div className="flex gap-1">
+            {[
+              { value: '',      label: 'All' },
+              { value: 'DRAFT', label: 'Draft' },
+              { value: 'SCHEDULED', label: 'Scheduled' },
+              { value: 'PUBLISHED', label: 'Published' },
+            ].map(opt => (
+              <button key={opt.value} onClick={() => { setPublishStatus(opt.value); setPage(1) }}
+                className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                  publishStatus === opt.value
+                    ? 'border-primary bg-primary/10 text-primary font-medium'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -782,10 +895,32 @@ export function Posts() {
                           {post.categories?.length > 0 && <> · {post.categories.slice(0, 2).join(', ')}</>}
                           {' · '}{formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
                           {post.sourcePublishedAt && (
-                            <> · orig {format(new Date(post.sourcePublishedAt), 'dd MMM yyyy')}</>
+                            <> · orig {format(new Date(post.sourcePublishedAt), 'dd MMM yyyy, HH:mm')}</>
                           )}
                         </p>
-                        {post.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs mt-0.5">Published</Badge>}
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {post.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
+                          {post._count?.socialPosts > 0 && (
+                            <Badge variant="outline" className="text-xs text-blue-400 border-blue-500/30 gap-1">
+                              <Share2 className="h-2.5 w-2.5" />
+                              {post._count.socialPosts > 1 ? `${post._count.socialPosts}×` : 'Shared'}
+                            </Badge>
+                          )}
+                          {post._count?.publishTasks > 0 && (
+                            <Badge variant="outline" className="text-xs text-teal-400 border-teal-500/30 gap-1">
+                              <Globe className="h-2.5 w-2.5" />
+                              {post._count.publishTasks > 1 ? `${post._count.publishTasks} sites` : '1 site'}
+                            </Badge>
+                          )}
+                        </div>
+                        {post.publishTasks?.length > 0 && (
+                          <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                            <Globe className="inline h-3 w-3 mr-0.5" />
+                            {post.publishTasks.map((t: any) => t.site?.name).filter(Boolean).join(', ')}
+                            {' — '}
+                            {post.publishTasks[0].wpUrl}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -888,11 +1023,16 @@ export function Posts() {
                   </div>
                 ) : (
                   <>
-                    {/* Featured image — full width, natural aspect ratio */}
+                    {/* Featured image — container ensures consistent sizing */}
                     {selected.imageUrl && (
-                      <img src={selected.imageUrl} alt=""
-                        className="w-full rounded-lg object-cover"
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                      <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-muted">
+                        <img src={selected.imageUrl} alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          onError={(e) => {
+                            const el = e.target as HTMLImageElement
+                            el.parentElement?.classList.add('hidden')
+                          }} />
+                      </div>
                     )}
 
                     {/* Title */}
@@ -913,7 +1053,7 @@ export function Posts() {
                   <span>·</span>
                   <span>{format(new Date(selected.createdAt), 'dd MMM yyyy, HH:mm')}</span>
                   {selected.sourcePublishedAt && (
-                    <><span>·</span><span className="text-amber-500/80">orig {format(new Date(selected.sourcePublishedAt), 'dd MMM yyyy')}</span></>
+                    <><span>·</span><span className="text-amber-500/80">orig {format(new Date(selected.sourcePublishedAt), 'dd MMM yyyy, HH:mm')}</span></>
                   )}
                   {selected.originalUrl && (() => {
                     try {
@@ -929,6 +1069,20 @@ export function Posts() {
                       )
                     } catch { return null }
                   })()}
+                  {selected.publishTasks?.map((t: any) => {
+                    try {
+                      const domain = new URL(t.wpUrl).hostname.replace(/^www\./, '')
+                      return (
+                        <span key={t.wpUrl}>
+                          <span>·</span>
+                          <a href={t.wpUrl} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 text-teal-400 hover:underline">
+                            {t.site?.name ?? domain} <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        </span>
+                      )
+                    } catch { return null }
+                  })}
                 </div>
 
                 {/* Editable categories */}
@@ -961,6 +1115,18 @@ export function Posts() {
                     className="h-5 w-24 text-xs bg-transparent border-b border-border/60 focus:outline-none focus:border-primary placeholder:text-muted-foreground/50"
                   />
                   {selected.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
+                  {selected._count?.socialPosts > 0 && (
+                    <Badge variant="outline" className="text-xs text-blue-400 border-blue-500/30 gap-1">
+                      <Share2 className="h-3 w-3" />
+                      {selected._count.socialPosts > 1 ? `Shared ${selected._count.socialPosts}×` : 'Shared socially'}
+                    </Badge>
+                  )}
+                  {selected._count?.publishTasks > 0 && (
+                    <Badge variant="outline" className="text-xs text-teal-400 border-teal-500/30 gap-1">
+                      <Globe className="h-3 w-3" />
+                      {selected._count.publishTasks > 1 ? `${selected._count.publishTasks} sites` : '1 site'}
+                    </Badge>
+                  )}
                   {selected.language && selected.language !== 'en' && (
                     <Badge variant="outline" className="text-xs font-mono">{selected.language}</Badge>
                   )}

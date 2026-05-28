@@ -3,7 +3,8 @@ import { redisOpts } from '../queue.js'
 import { db } from '../db.js'
 import { decrypt } from '../lib/crypto.js'
 import { generateCaption } from '../lib/caption.js'
-import { generateSocialImage, uploadSocialImage } from '../lib/social-image.js'
+import { generateSocialImage, generatePhotoCommentBanner, uploadSocialImage } from '../lib/social-image.js'
+
 
 export interface SocialJobData {
   socialPostId: string
@@ -89,10 +90,28 @@ async function fetchPostInsights(socialPostId: string): Promise<void> {
   }
 }
 
+type SiteCreds = { id: string; url: string; apiUser: string; apiPassword: string; jwtToken: string | null }
+
+async function resolvePostUrl(postId: string, site: SiteCreds): Promise<string> {
+  const existing = await db.publishTask.findUnique({
+    where:  { postId_siteId: { postId, siteId: site.id } },
+    select: { status: true, wpUrl: true },
+  })
+  if (existing?.status === 'DONE' && existing.wpUrl) return existing.wpUrl
+
+  throw new Error(
+    `Post ${postId} has not been published to site ${site.id}. ` +
+    'Publish the post to the destination site before sharing to social media.'
+  )
+}
+
 async function processSocialPost(socialPostId: string): Promise<void> {
   const record = await db.socialPost.findUniqueOrThrow({
-    where: { id: socialPostId },
-    include: { post: true, account: true },
+    where:   { id: socialPostId },
+    include: {
+      post:    true,
+      account: { include: { site: { select: { id: true, url: true, apiUser: true, apiPassword: true, jwtToken: true } } } },
+    },
   })
 
   await db.socialPost.update({
@@ -104,6 +123,12 @@ async function processSocialPost(socialPostId: string): Promise<void> {
     const token = decrypt(record.account.accessToken)
     const pageId = record.account.pageId
 
+    if (!record.account.site) {
+      throw new Error('Social account is not linked to a destination site. Link a site before sharing.')
+    }
+
+    const link = await resolvePostUrl(record.post.id, record.account.site)
+
     const captionTemplate = await db.captionTemplate.findFirst({
       where: { platform: record.account.platform },
     })
@@ -113,7 +138,7 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       categories:      record.post.categories,
       aiTags:          record.post.aiTags,
       originalUrl:     record.post.originalUrl ?? '',
-      wpUrl:           undefined,
+      wpUrl:           link,
       language:        captionTemplate?.language ?? 'sq',
       includeHashtags: captionTemplate?.includeHashtags ?? true,
       includeExcerpt:  captionTemplate?.includeExcerpt ?? false,
@@ -121,8 +146,6 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       brandingText:    captionTemplate?.brandingText ?? undefined,
       emojiStyle:      (captionTemplate?.emojiStyle as 'category' | 'none') ?? 'category',
     })
-
-    const link = record.post.originalUrl ?? ''
     const template = record.template
 
     let platformPostId: string | undefined
@@ -182,14 +205,25 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       }
 
     } else if (template === 'photo_comment') {
+      const bannerBuf = await generatePhotoCommentBanner(record.post.imageUrl)
+      const bannerUrl = await uploadSocialImage(bannerBuf, `${record.post.id}-banner`)
+      const firstComment = `Lexo lajmin e plotë në: ${link}`
+
       if (platform === 'INSTAGRAM') {
-        if (!record.post.imageUrl) throw new Error('Instagram photo_comment requires a featured image')
-        platformPostId = await igPublishPhoto(pageId, record.post.imageUrl, caption + '\n\n' + link, token)
+        platformPostId = await igPublishPhoto(pageId, bannerUrl, caption, token)
+        // Instagram Graph API supports first-comment on business accounts
+        if (platformPostId) {
+          await fetch(`https://graph.facebook.com/v19.0/${platformPostId}/comments`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: firstComment, access_token: token }),
+          }).catch(() => { /* non-fatal — comment may not be supported on all account types */ })
+        }
       } else {
         const photoRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: record.post.imageUrl, caption: record.post.title, access_token: token }),
+          body: JSON.stringify({ url: bannerUrl, caption: record.post.title, access_token: token }),
         })
         const photoData = await photoRes.json() as any
         if (photoData.error) throw new Error(photoData.error.message ?? 'Facebook API error')
@@ -198,7 +232,7 @@ async function processSocialPost(socialPostId: string): Promise<void> {
         const commentRes = await fetch(`https://graph.facebook.com/v19.0/${photoData.id}/comments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: link, access_token: token }),
+          body: JSON.stringify({ message: firstComment, access_token: token }),
         })
         const commentData = await commentRes.json() as any
         if (commentData.error) throw new Error(commentData.error.message ?? 'Facebook API error')

@@ -10,7 +10,7 @@ import { Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
 
 export function Account() {
-  const { user, login } = useAuth()
+  const { user } = useAuth()
   const qc = useQueryClient()
   const [name, setName] = useState(user?.name ?? '')
   const [email, setEmail] = useState(user?.email ?? '')
@@ -33,7 +33,7 @@ export function Account() {
       }
       return authApi.updateMe(body)
     },
-    onSuccess: (data) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['me'] })
       setCurrentPassword('')
       setNewPassword('')

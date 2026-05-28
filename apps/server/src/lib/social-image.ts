@@ -381,6 +381,40 @@ export async function generateSocialImage(opts: ImageOptions): Promise<Buffer> {
   return result
 }
 
+const PHOTO_COMMENT_BANNER_TEXT = 'Linku në komentin e parë 👇'
+
+export async function generatePhotoCommentBanner(imageUrl: string | null | undefined): Promise<Buffer> {
+  let base: sharp.Sharp
+  if (imageUrl) {
+    const res = await fetch(imageUrl, { signal: AbortSignal.timeout(12000) })
+    if (!res.ok) throw new Error(`Failed to fetch image: ${res.status}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    base = sharp(buf).resize(1080, 1080, { fit: 'cover' })
+  } else {
+    base = sharp({
+      create: { width: 1080, height: 1080, channels: 4, background: { r: 26, g: 26, b: 26, alpha: 1 } },
+    })
+  }
+
+  const bannerHeight = 56
+  const bannerSvg = Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <rect x="0" y="${1080 - bannerHeight}" width="1080" height="${bannerHeight}" fill="black" opacity="0.92"/>
+      <text x="540" y="${1080 - bannerHeight / 2 + 1}"
+        text-anchor="middle" dominant-baseline="middle"
+        fill="white" font-family="Arial, Helvetica, sans-serif"
+        font-size="22" font-weight="bold" letter-spacing="3">
+        ${escapeXml(PHOTO_COMMENT_BANNER_TEXT)}
+      </text>
+    </svg>`
+  )
+
+  return base
+    .composite([{ input: bannerSvg, blend: 'over' }])
+    .jpeg({ quality: 90 })
+    .toBuffer()
+}
+
 export async function uploadSocialImage(buffer: Buffer, postId: string): Promise<string> {
   const s3Url = await uploadImage(buffer, 'image/jpeg', `social-${postId}`)
   if (s3Url) return s3Url

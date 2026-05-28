@@ -34,7 +34,22 @@ export async function postsRoutes(app: FastifyInstance) {
         skip: (query.page - 1) * query.per_page,
         take: query.per_page,
         orderBy: { createdAt: 'desc' },
-        include: { source: { select: { name: true } } },
+        include: {
+          source: { select: { name: true } },
+          publishTasks: {
+            where: { status: 'DONE' },
+            select: {
+              wpUrl: true,
+              site:  { select: { id: true, name: true, url: true } },
+            },
+          },
+          _count: {
+            select: {
+              socialPosts:  { where: { status: 'DONE' } },
+              publishTasks: { where: { status: 'DONE' } },
+            },
+          },
+        },
       }),
     ])
     return { total, pages: Math.ceil(total / query.per_page), page: query.page, items }

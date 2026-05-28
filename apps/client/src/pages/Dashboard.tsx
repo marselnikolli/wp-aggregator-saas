@@ -119,7 +119,7 @@ export function Dashboard() {
           <span className="text-xs text-muted-foreground">Stories covered by multiple sources in the last 7 days</span>
         </div>
         {!trendingData ? (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-28" />)}
           </div>
         ) : trendingData.trending?.length === 0 ? (
@@ -130,7 +130,7 @@ export function Dashboard() {
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
             {trendingData.trending.slice(0, 24).map((story: {
               id: string; title: string; count: number; latestAt: string
               imageUrl: string | null; originalUrl: string | null; sources: string[]

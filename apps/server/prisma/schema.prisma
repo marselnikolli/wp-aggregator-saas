@@ -139,6 +139,7 @@ model PublishTask {
 
   @@unique([postId, siteId])
   @@index([status])
+  @@index([siteId, status])
 }
 
 model FetchJob {

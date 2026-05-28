@@ -37,12 +37,15 @@ export const sourcesApi = {
   remove:     (id: string) => api.delete(`/sources/${id}`),
   fetch:      (id: string) => api.post(`/sources/${id}/fetch`).then(r => r.data),
   fetchAll:   () => api.post('/sources/fetch-all').then(r => r.data),
+  bulkGroup:  (group: string, action: 'enable' | 'disable' | 'fetch') =>
+    api.post('/sources/bulk-group', { group, action }).then(r => r.data),
   import:     (urls: string[]) => api.post('/sources/import', { urls }).then(r => r.data),
   importOpml: (content: string) => api.post('/sources/import-opml', { content }).then(r => r.data),
   categories: (id: string) => api.get(`/sources/${id}/categories`).then(r => r.data),
   detect:     (url: string) => api.post('/sources/detect', { url }).then(r => r.data),
   scanCustom: (endpoint: string) => api.post('/sources/scan-custom', { endpoint }).then(r => r.data),
   health:     (id: string) => api.get(`/sources/${id}/health`).then(r => r.data),
+  groups:     () => api.get('/sources/groups').then(r => r.data),
   reorder:    (id: string, beforeId: string | null, afterId: string | null) =>
     api.patch(`/sources/${id}/reorder`, { beforeId, afterId }).then(r => r.data),
 }

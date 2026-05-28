@@ -755,6 +755,10 @@ export function Sources() {
   const [perPage, setPerPage] = useState(20)
   const [tagFilter, setTagFilter] = useState('')
   const [groupFilter, setGroupFilter] = useState('')
+  const { data: groups = [] } = useQuery({
+    queryKey: ['source-groups'],
+    queryFn:  sourcesApi.groups,
+  })
   const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
   const [fetchPct, setFetchPct] = useState<Record<string, number>>({})
   const [expandedHealth, setExpandedHealth] = useState<Record<string, boolean>>({})
@@ -846,6 +850,17 @@ export function Sources() {
     onSuccess: (d) => toast.success(`${d.queued} sources queued for fetch`),
   })
 
+  const bulkGroup = useMutation({
+    mutationFn: ({ action }: { action: 'enable' | 'disable' | 'fetch' }) =>
+      sourcesApi.bulkGroup(groupFilter, action),
+    onSuccess: (d, { action }) => {
+      invalidate()
+      if (action === 'fetch') toast.success(`${d.queued} sources in group queued for fetch`)
+      else toast.success(`${d.updated} sources ${action === 'enable' ? 'enabled' : 'disabled'}`)
+    },
+    onError: () => toast.error('Bulk action failed'),
+  })
+
   const refetchImages = useMutation({
     mutationFn: (sourceId?: string) => postsApi.bulkRefetchImages(sourceId),
     onSuccess: (d) => toast.success(`Re-scraped ${d.processed} posts — ${d.updated} updated, ${d.failed} failed`),
@@ -905,6 +920,15 @@ export function Sources() {
         </div>
       </div>
 
+      <div className="flex items-center gap-2">
+        <select value={groupFilter} onChange={e => { setGroupFilter(e.target.value); setPage(1) }}
+          className="h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+          <option value="">All groups</option>
+          {groups.map((g: string) => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <div className="h-6 w-px bg-border" />
+      </div>
+
       {(tagFilter || groupFilter) && (
         <div className="flex items-center gap-2 flex-wrap">
           {tagFilter && (
@@ -925,6 +949,28 @@ export function Sources() {
               </span>
             </>
           )}
+        </div>
+      )}
+
+      {groupFilter && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2">
+          <span className="text-xs text-muted-foreground mr-1">Bulk actions for <strong>{groupFilter}</strong>:</span>
+          <Button size="sm" variant="outline" className="h-7 text-xs"
+            disabled={bulkGroup.isPending}
+            onClick={() => bulkGroup.mutate({ action: 'enable' })}>
+            Enable all
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs"
+            disabled={bulkGroup.isPending}
+            onClick={() => bulkGroup.mutate({ action: 'disable' })}>
+            Disable all
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs"
+            disabled={bulkGroup.isPending}
+            onClick={() => bulkGroup.mutate({ action: 'fetch' })}>
+            {bulkGroup.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+            Fetch all
+          </Button>
         </div>
       )}
 

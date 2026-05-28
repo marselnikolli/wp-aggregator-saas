@@ -45,6 +45,32 @@ async function downloadImage(url: string): Promise<{ buffer: Buffer; mimeType: s
   }
 }
 
+async function reHostContentImages(content: string, client: WPClient, siteUrl: string): Promise<string> {
+  const normalizedSite = siteUrl.replace(/\/$/, '')
+  const srcRegex = /<img[^>]+src=["']([^"']+)["']/gi
+  const urls = new Set<string>()
+  let m
+  while ((m = srcRegex.exec(content)) !== null) {
+    const src = m[1]
+    if (!src.startsWith('http') || src.startsWith(normalizedSite)) continue
+    urls.add(src)
+  }
+  if (urls.size === 0) return content
+
+  let result = content
+  for (const originalUrl of urls) {
+    try {
+      const img = await downloadImage(originalUrl)
+      if (!img) continue
+      const media = await client.uploadMedia(img)
+      result = result.split(originalUrl).join(media.source_url)
+    } catch (err) {
+      console.warn(`[publish-worker] content image re-host failed for ${originalUrl}:`, (err as Error).message)
+    }
+  }
+  return result
+}
+
 async function applyAiPrompt(content: string, title: string, prompt: string): Promise<string> {
   const [anthropicKey, openaiKey] = await Promise.all([
     getSettingValue('anthropic_key'),
@@ -162,9 +188,10 @@ async function runPublishTask(taskId: string, aiPrompt?: string) {
   const wpStatus = (task.wpStatus ?? 'publish') as 'publish' | 'draft' | 'future'
 
   const baseContent = task.post.aiSummary ?? task.post.content ?? ''
-  const finalContent = aiPrompt && baseContent
+  const rewrittenContent = aiPrompt && baseContent
     ? await applyAiPrompt(baseContent, task.post.aiTitle ?? task.post.title, aiPrompt).catch(() => baseContent)
     : baseContent
+  const finalContent = await reHostContentImages(rewrittenContent, client, task.site.url)
 
   const payload = {
     title:           task.post.aiTitle ?? task.post.title,

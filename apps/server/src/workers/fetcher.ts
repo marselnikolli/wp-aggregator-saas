@@ -561,7 +561,11 @@ export async function tryOgImageFallback(postId: string, articleUrl: string): Pr
     const ogImage =
       $('meta[property="og:image"]').attr('content') ??
       $('meta[name="twitter:image"]').attr('content') ??
-      $('meta[property="og:image:url"]').attr('content')
+      $('meta[property="og:image:url"]').attr('content') ??
+      // Fallback to first <img> in article body when og:image is missing
+      ($('article img, .post-content img, .entry-content img, .article-content img').first().attr('src') ??
+       $('main img').first().attr('src') ??
+       $('img').first().attr('src'))
     if (!ogImage) return false
     const resolved = ogImage.startsWith('http') ? ogImage : new URL(ogImage, articleUrl).href
     const slug = slugify(articleUrl.split('/').pop() ?? postId) || postId

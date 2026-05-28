@@ -17,6 +17,20 @@ export async function socialRoutes(app: FastifyInstance) {
 
     const account = await db.socialAccount.findUniqueOrThrow({ where: { id: body.accountId } })
 
+    if (!account.siteId) {
+      return reply.code(422).send({ error: 'Social account must be linked to a destination site before sharing' })
+    }
+
+    const publishTask = await db.publishTask.findUnique({
+      where:  { postId_siteId: { postId: body.postId, siteId: account.siteId } },
+      select: { status: true },
+    })
+    if (!publishTask || publishTask.status !== 'DONE') {
+      return reply.code(422).send({
+        error: 'Post must be published to the destination site before sharing to social media. Publish the post first.',
+      })
+    }
+
     const status = body.scheduledAt ? 'SCHEDULED' : 'PENDING'
     const record = await db.socialPost.create({
       data: {
@@ -47,8 +61,17 @@ export async function socialRoutes(app: FastifyInstance) {
 
     const account = await db.socialAccount.findUniqueOrThrow({ where: { id: body.accountId } })
 
+    if (!account.siteId) {
+      return reply.code(422).send({ error: 'Social account must be linked to a destination site before sharing' })
+    }
+
     let enqueued = 0
     for (const postId of body.postIds) {
+      const task = await db.publishTask.findUnique({
+        where:  { postId_siteId: { postId, siteId: account.siteId } },
+        select: { status: true },
+      })
+      if (!task || task.status !== 'DONE') continue
       const record = await db.socialPost.create({
         data: {
           postId,
@@ -180,15 +203,27 @@ export async function socialRoutes(app: FastifyInstance) {
       template:  templateEnum,
     }).parse(req.body)
 
-    const post    = await db.aggregatedPost.findUniqueOrThrow({ where: { id: body.postId } })
-    const account = await db.socialAccount.findUniqueOrThrow({ where: { id: body.accountId } })
-    const tmpl    = await db.captionTemplate.findFirst({ where: { platform: account.platform } })
+    const [post, account] = await Promise.all([
+      db.aggregatedPost.findUniqueOrThrow({ where: { id: body.postId } }),
+      db.socialAccount.findUniqueOrThrow({ where: { id: body.accountId }, select: { platform: true, siteId: true } }),
+    ])
+    const tmpl = await db.captionTemplate.findFirst({ where: { platform: account.platform } })
+
+    // Resolve best available URL: WP site URL if published, else originalUrl
+    let postUrl = post.originalUrl ?? ''
+    if (account.siteId) {
+      const task = await db.publishTask.findUnique({
+        where:  { postId_siteId: { postId: body.postId, siteId: account.siteId } },
+        select: { status: true, wpUrl: true },
+      })
+      if (task?.status === 'DONE' && task.wpUrl) postUrl = task.wpUrl
+    }
 
     const caption = generateCaption({
       title:           post.title,
       categories:      post.categories,
       aiTags:          post.aiTags,
-      originalUrl:     post.originalUrl ?? '',
+      originalUrl:     postUrl,
       language:        tmpl?.language ?? 'sq',
       includeHashtags: tmpl?.includeHashtags ?? true,
       includeExcerpt:  tmpl?.includeExcerpt  ?? false,
@@ -197,6 +232,10 @@ export async function socialRoutes(app: FastifyInstance) {
       emojiStyle:      (tmpl?.emojiStyle as 'category' | 'none') ?? 'category',
     })
 
-    return reply.send({ caption })
+    const previewCaption = body.template === 'photo_comment'
+      ? `Lexo lajmin e plotë në: ${postUrl}`
+      : caption
+
+    return reply.send({ caption: previewCaption })
   })
 }

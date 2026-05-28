@@ -47,7 +47,7 @@ const sourceUpdateBody = z.object({
   type:              z.enum(['RSS', 'WP_API', 'CUSTOM_API']).optional(),
   enabled:           z.boolean().optional(),
   interval:          z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
-  username:          z.string().optional(),
+  username:          z.string().nullable().optional(),
   password:          z.string().optional(),
   tags:              z.array(z.string()).optional(),
   minDelaySec:       z.number().int().min(0).max(60).optional(),
@@ -57,7 +57,7 @@ const sourceUpdateBody = z.object({
   userAgent:         z.string().nullable().optional(),
   proxyUrl:          z.string().nullable().optional(),
   categoryMap:       z.record(z.record(z.string())).nullable().optional(),
-  group:             z.string().optional(),
+  group:             z.string().nullable().optional(),
 })
 
 export async function sourcesRoutes(app: FastifyInstance) {
@@ -86,6 +86,13 @@ export async function sourcesRoutes(app: FastifyInstance) {
     // Never send password to client
     const safeItems = items.map(({ password: _pw, ...s }) => s)
     return { total, pages: Math.ceil(total / query.per_page), page: query.page, items: safeItems }
+  })
+
+  app.get('/sources/groups', { preHandler: [app.authenticate] }, async () => {
+    const rows = await db.$queryRaw<Array<{ group: string }>>`
+      SELECT DISTINCT "group" FROM "Source" WHERE "group" IS NOT NULL AND "group" != '' ORDER BY "group" ASC
+    `
+    return rows.map(r => r.group)
   })
 
   app.post('/sources', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -245,6 +252,26 @@ export async function sourcesRoutes(app: FastifyInstance) {
     const sources = await db.source.findMany({ where: { enabled: true }, select: { id: true } })
     const jobs = await Promise.all(
       sources.map((s) => fetchQueue.add('fetch-source', { sourceId: s.id }))
+    )
+    return { queued: jobs.length }
+  })
+
+  app.post('/sources/bulk-group', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { group, action } = z.object({
+      group:  z.string().min(1),
+      action: z.enum(['enable', 'disable', 'fetch']),
+    }).parse(req.body)
+
+    const sources = await db.source.findMany({ where: { group }, select: { id: true } })
+    if (!sources.length) return reply.code(404).send({ error: 'No sources in group' })
+
+    if (action === 'enable' || action === 'disable') {
+      await db.source.updateMany({ where: { group }, data: { enabled: action === 'enable' } })
+      return { updated: sources.length }
+    }
+
+    const jobs = await Promise.all(
+      sources.map(s => fetchQueue.add('fetch-source', { sourceId: s.id }))
     )
     return { queued: jobs.length }
   })
