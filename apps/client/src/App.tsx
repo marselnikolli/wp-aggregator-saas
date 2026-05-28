@@ -12,6 +12,7 @@ import { AuditLog }  from '@/pages/AuditLog'
 import { Team }      from '@/pages/Team'
 import { Account }   from '@/pages/Account'
 import { Pipelines }      from '@/pages/Pipelines'
+import { PipelineEditor } from '@/pages/PipelineEditor'
 import { PublishHistory } from '@/pages/PublishHistory'
 import { Dedup } from '@/pages/Dedup'
 import { SocialAccounts }  from '@/pages/social/SocialAccounts'
@@ -57,7 +58,9 @@ function AppRoutes() {
         <Route path="audit-log" element={<AuditLog />} />
         <Route path="team"       element={<Team />} />
         <Route path="account"   element={<Account />} />
-        <Route path="pipelines"     element={<Pipelines />} />
+        <Route path="pipelines"          element={<Pipelines />} />
+        <Route path="pipelines/new"      element={<PipelineEditor />} />
+        <Route path="pipelines/:id/edit" element={<PipelineEditor />} />
         <Route path="history"       element={<PublishHistory />} />
         <Route path="dedup"        element={<Dedup />} />
         <Route path="social/accounts"   element={<SocialAccounts />} />

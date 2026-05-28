@@ -388,7 +388,7 @@ export function Settings() {
   const [showAddTemplate, setShowAddTemplate] = useState(false)
   const [newTemplate, setNewTemplate] = useState({
     name: '', platform: 'FACEBOOK' as 'FACEBOOK' | 'INSTAGRAM',
-    language: 'sq', includeHashtags: true, includeExcerpt: false,
+    language: 'sq', includeHashtags: true, includeExcerpt: false, includeContent: false,
     brandingText: '', emojiStyle: 'category' as 'category' | 'none',
   })
   const createTemplate = useMutation({
@@ -396,7 +396,7 @@ export function Settings() {
     onSuccess: () => {
       refetchTemplates()
       setShowAddTemplate(false)
-      setNewTemplate({ name: '', platform: 'FACEBOOK', language: 'sq', includeHashtags: true, includeExcerpt: false, brandingText: '', emojiStyle: 'category' })
+      setNewTemplate({ name: '', platform: 'FACEBOOK', language: 'sq', includeHashtags: true, includeExcerpt: false, includeContent: false, brandingText: '', emojiStyle: 'category' })
       toast.success('Template created')
     },
     onError: () => toast.error('Failed to create template'),
@@ -743,6 +743,11 @@ export function Settings() {
                   <input type="checkbox" checked={newTemplate.includeExcerpt}
                     onChange={e => setNewTemplate(p => ({ ...p, includeExcerpt: e.target.checked }))} />
                   <span className="text-sm">Include excerpt</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={newTemplate.includeContent}
+                    onChange={e => setNewTemplate(p => ({ ...p, includeContent: e.target.checked }))} />
+                  <span className="text-sm">Include full text</span>
                 </label>
               </div>
               <div className="flex gap-2">

@@ -142,10 +142,10 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
   app.get('/dashboard/queues', { preHandler: [app.authenticate] }, async () => {
     const [f, p, s, so] = await Promise.all([
-      fetchQueue.getJobCounts('waiting', 'active', 'failed'),
-      publishQueue.getJobCounts('waiting', 'active', 'failed'),
-      summarizeQueue.getJobCounts('waiting', 'active', 'failed'),
-      socialQueue.getJobCounts('waiting', 'active', 'failed'),
+      fetchQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
+      publishQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
+      summarizeQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
+      socialQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
     ])
     return { fetch: f, publish: p, summarize: s, social: so }
   })

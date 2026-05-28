@@ -8,8 +8,28 @@ export interface CaptionOptions {
   includeHashtags?: boolean
   includeExcerpt?: boolean
   excerpt?: string
+  includeContent?: boolean
+  content?: string
   brandingText?: string
   emojiStyle?: 'category' | 'none'
+}
+
+function stripContent(html: string): string {
+  let text = html
+    .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+    .replace(/<video[^>]*>[\s\S]*?<\/video>/gi, '')
+    .replace(/<img[^>]*>/gi, '')
+    .replace(/<[^>]*>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (text.length > 1000) text = text.slice(0, 1000) + '…'
+  return text
 }
 
 const CATEGORY_EMOJI: Record<string, string> = {
@@ -48,6 +68,8 @@ export function generateCaption(opts: CaptionOptions): string {
     includeHashtags = true,
     includeExcerpt = false,
     excerpt,
+    includeContent = false,
+    content,
     brandingText,
     emojiStyle = 'category',
   } = opts
@@ -61,6 +83,10 @@ export function generateCaption(opts: CaptionOptions): string {
 
   if (includeExcerpt && excerpt) {
     parts.push('\n' + excerpt)
+  }
+
+  if (includeContent && content) {
+    parts.push('\n\n' + stripContent(content))
   }
 
   parts.push('\n' + link)

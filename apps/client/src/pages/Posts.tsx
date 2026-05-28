@@ -193,22 +193,31 @@ function SocialPostPreview({ post, template, caption }: { post: any; template: s
 }
 
 function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
-  const [accountId,   setAccountId]   = useState('')
-  const [template,    setTemplate]    = useState('link_post')
-  const [scheduledAt, setScheduledAt] = useState('')
-  const [caption,     setCaption]     = useState('')
-  const [captionLoading, setCaptionLoading] = useState(false)
-  const [result,      setResult]      = useState<{ ok: boolean; message: string } | null>(null)
-  const [publishing,  setPublishing]  = useState(false)
+  const [accountId,         setAccountId]         = useState('')
+  const [template,          setTemplate]          = useState('link_post')
+  const [scheduledAt,       setScheduledAt]       = useState('')
+  const [captionTemplateId, setCaptionTemplateId] = useState('')
+  const [caption,           setCaption]           = useState('')
+  const [captionLoading,    setCaptionLoading]    = useState(false)
+  const [result,            setResult]            = useState<{ ok: boolean; message: string } | null>(null)
+  const [publishing,        setPublishing]        = useState(false)
 
   const { data: accounts } = useQuery({
     queryKey: ['social-accounts'],
     queryFn:  socialApi.accounts,
   })
 
+  const { data: captionTemplates } = useQuery({
+    queryKey: ['caption-templates'],
+    queryFn:  () => import('@/lib/api').then(m => m.captionTemplatesApi.list()),
+  })
+
   const selectedAccount = (accounts ?? []).find((a: any) => a.id === accountId)
   const hasSite = !!selectedAccount?.siteId
   const availableTemplates = SOCIAL_TEMPLATES.filter(t => !t.needsSite || hasSite)
+  const platformTemplates = (captionTemplates ?? []).filter(
+    (t: any) => selectedAccount && t.platform === selectedAccount.platform
+  )
 
   const isPublishedToAccountSite = selectedAccount?.siteId
     ? post?.publishTasks?.some((t: any) => t.site?.id === selectedAccount.siteId)
@@ -221,6 +230,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
   // Auto-switch to an image-only template when selected account has no linked site
   useEffect(() => {
     if (!accountId) return
+    setCaptionTemplateId('')
     const valid = availableTemplates.find(t => t.value === template)
     if (!valid) setTemplate('photo_only')
   }, [accountId, hasSite]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -231,7 +241,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
     const t = setTimeout(async () => {
       setCaptionLoading(true)
       try {
-        const res = await socialApi.previewCaption(post.id, accountId, template)
+        const res = await socialApi.previewCaption(post.id, accountId, template, captionTemplateId || undefined)
         if (!cancelled) setCaption(res.caption ?? '')
       } catch {
         if (!cancelled) setCaption('')
@@ -240,7 +250,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
       }
     }, 500)
     return () => { cancelled = true; clearTimeout(t) }
-  }, [accountId, template, post?.id])
+  }, [accountId, template, captionTemplateId, post?.id])
 
   async function handlePublish() {
     if (!accountId) return
@@ -248,10 +258,11 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
     setResult(null)
     try {
       await socialApi.publish({
-        postId:      post.id,
+        postId:           post.id,
         accountId,
         template,
-        scheduledAt: scheduledAt || undefined,
+        scheduledAt:      scheduledAt || undefined,
+        captionTemplateId: captionTemplateId || undefined,
       })
       setResult({ ok: true, message: scheduledAt ? 'Scheduled successfully' : 'Published successfully' })
     } catch (e: any) {
@@ -265,7 +276,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
         <div className="space-y-4 py-2">
           <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
@@ -349,6 +360,22 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
               </p>
             )}
           </div>
+
+          {accountId && platformTemplates.length > 0 && (
+            <div className="grid gap-1.5">
+              <Label className="text-xs">Caption template</Label>
+              <select
+                value={captionTemplateId}
+                onChange={e => setCaptionTemplateId(e.target.value)}
+                className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">Default</option>
+                {platformTemplates.map((t: any) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           <div className="grid gap-1.5">
             <Label className="text-xs">
@@ -436,6 +463,12 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
   const { data: sites } = useQuery({ queryKey: ['sites'], queryFn: sitesApi.list })
   const qc = useQueryClient()
 
+  const catQuery = useQuery({
+    queryKey: ['site-categories', expandedId],
+    queryFn: () => sitesApi.categories(expandedId!),
+    enabled: !!expandedId,
+  })
+
   const toggle = (siteId: string, checked: boolean) => {
     if (checked) {
       setTargets(p => ({ ...p, [siteId]: { siteId, wpStatus: 'publish', scheduleAt: '', categoryOverride: '', tagOverrides: '' } }))
@@ -514,8 +547,14 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
                     )}
                     <div>
                       <Label className="text-xs">Category override</Label>
-                      <Input className="mt-1 h-8 text-xs" placeholder="e.g. Technology" value={t.categoryOverride}
-                        onChange={e => update(site.id, 'categoryOverride', e.target.value)} />
+                      <select value={t.categoryOverride}
+                        onChange={e => update(site.id, 'categoryOverride', e.target.value)}
+                        className="mt-1 h-8 w-full rounded border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
+                        <option value="">None</option>
+                        {(catQuery.data ?? []).map((cat: any) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <Label className="text-xs">Tag overrides <span className="text-muted-foreground">(comma-separated)</span></Label>

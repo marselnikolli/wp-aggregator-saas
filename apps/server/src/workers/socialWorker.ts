@@ -20,6 +20,21 @@ export const socialQueue = new Queue<SocialJobData, any, string>('social', {
   },
 })
 
+// Facebook: upload photo binary directly (multipart) — no S3/public URL needed
+async function fbUploadPhoto(pageId: string, token: string, imageBuffer: Buffer, caption: string): Promise<string> {
+  const form = new FormData()
+  form.append('source', new Blob([new Uint8Array(imageBuffer)], { type: 'image/jpeg' }), 'photo.jpg')
+  form.append('caption', caption)
+  form.append('access_token', token)
+  const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
+    method: 'POST',
+    body: form,
+  })
+  const data = await res.json() as any
+  if (data.error) throw new Error(data.error.message ?? 'Facebook photo upload error')
+  return data.id
+}
+
 // Instagram 2-step container flow: create media → publish
 async function igPublishPhoto(igUserId: string, imageUrl: string, caption: string, token: string): Promise<string> {
   const containerRes = await fetch(`https://graph.facebook.com/v19.0/${igUserId}/media`, {
@@ -129,9 +144,9 @@ async function processSocialPost(socialPostId: string): Promise<void> {
 
     const link = await resolvePostUrl(record.post.id, record.account.site)
 
-    const captionTemplate = await db.captionTemplate.findFirst({
-      where: { platform: record.account.platform },
-    })
+    const captionTemplate = record.captionTemplateId
+      ? await db.captionTemplate.findUnique({ where: { id: record.captionTemplateId } })
+      : await db.captionTemplate.findFirst({ where: { platform: record.account.platform } })
 
     const caption = generateCaption({
       title:           record.post.aiTitle ?? record.post.title,
@@ -143,6 +158,8 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       includeHashtags: captionTemplate?.includeHashtags ?? true,
       includeExcerpt:  captionTemplate?.includeExcerpt ?? false,
       excerpt:         record.post.excerpt ?? undefined,
+      includeContent:  captionTemplate?.includeContent ?? false,
+      content:         record.post.content ?? undefined,
       brandingText:    captionTemplate?.brandingText ?? undefined,
       emojiStyle:      (captionTemplate?.emojiStyle as 'category' | 'none') ?? 'category',
     })
@@ -190,52 +207,41 @@ async function processSocialPost(socialPostId: string): Promise<void> {
         imageUrl:       record.post.imageUrl ?? undefined,
         categoryColors: captionTemplate ? (captionTemplate.categoryColors as Record<string, string> ?? {}) : {},
       })
-      const imgUrl = await uploadSocialImage(imgBuffer, record.post.id)
       if (platform === 'INSTAGRAM') {
+        // Instagram requires a public URL for the container step
+        const imgUrl = await uploadSocialImage(imgBuffer, record.post.id)
         platformPostId = await igPublishPhoto(pageId, imgUrl, caption, token)
       } else {
-        const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: imgUrl, caption: record.post.title, access_token: token }),
-        })
-        const json = await res.json() as any
-        if (json.error) throw new Error(json.error.message)
-        platformPostId = json.id
+        // Facebook: upload binary directly — no S3 required
+        platformPostId = await fbUploadPhoto(pageId, token, imgBuffer, caption)
       }
 
     } else if (template === 'photo_comment') {
       const bannerBuf = await generatePhotoCommentBanner(record.post.imageUrl)
-      const bannerUrl = await uploadSocialImage(bannerBuf, `${record.post.id}-banner`)
       const firstComment = `Lexo lajmin e plotë në: ${link}`
 
       if (platform === 'INSTAGRAM') {
+        // Instagram requires a public URL
+        const bannerUrl = await uploadSocialImage(bannerBuf, `${record.post.id}-banner`)
         platformPostId = await igPublishPhoto(pageId, bannerUrl, caption, token)
-        // Instagram Graph API supports first-comment on business accounts
         if (platformPostId) {
           await fetch(`https://graph.facebook.com/v19.0/${platformPostId}/comments`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ message: firstComment, access_token: token }),
-          }).catch(() => { /* non-fatal — comment may not be supported on all account types */ })
+          }).catch(() => { /* non-fatal — first-comment may not be available on all account types */ })
         }
       } else {
-        const photoRes = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: bannerUrl, caption: record.post.title, access_token: token }),
-        })
-        const photoData = await photoRes.json() as any
-        if (photoData.error) throw new Error(photoData.error.message ?? 'Facebook API error')
-        platformPostId = photoData.id
+        // Facebook: upload banner binary directly, then comment
+        platformPostId = await fbUploadPhoto(pageId, token, bannerBuf, record.post.title)
 
-        const commentRes = await fetch(`https://graph.facebook.com/v19.0/${photoData.id}/comments`, {
+        const commentRes = await fetch(`https://graph.facebook.com/v19.0/${platformPostId}/comments`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: firstComment, access_token: token }),
         })
         const commentData = await commentRes.json() as any
-        if (commentData.error) throw new Error(commentData.error.message ?? 'Facebook API error')
+        if (commentData.error) throw new Error(commentData.error.message ?? 'Facebook comment error')
       }
 
     } else if (template === 'text_link') {

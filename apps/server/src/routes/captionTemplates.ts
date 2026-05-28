@@ -9,6 +9,7 @@ const templateBody = z.object({
   language:        z.string().optional().default('sq'),
   includeHashtags: z.boolean().optional().default(true),
   includeExcerpt:  z.boolean().optional().default(false),
+  includeContent:  z.boolean().optional().default(false),
   brandingText:    z.string().optional().nullable(),
   emojiStyle:      z.enum(['category', 'none']).optional().default('category'),
   categoryColors:  z.record(z.string()).optional().nullable(),

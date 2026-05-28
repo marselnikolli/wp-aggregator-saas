@@ -211,6 +211,9 @@ model Pipeline {
   socialAccountId      String?
   socialTemplate       String?
   languageSiteMapping  Json?
+  // Array of { sourceId, sourceCategory, destCategoryId, destCategoryName }
+  categoryMappings     Json?
+  postLimit            Int      @default(50)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -282,22 +285,23 @@ model SocialAccount {
 }
 
 model SocialPost {
-  id             String         @id @default(cuid())
-  postId         String
-  post           AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
-  accountId      String
-  account        SocialAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  platform       SocialPlatform
-  template       String
-  status         SocialStatus   @default(PENDING)
-  scheduledAt    DateTime?
-  publishedAt    DateTime?
-  platformPostId String?
-  error          String?
-  reach          Int?
-  impressions    Int?
-  engagement     Int?
-  createdAt      DateTime       @default(now())
+  id                String         @id @default(cuid())
+  postId            String
+  post              AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  accountId         String
+  account           SocialAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  platform          SocialPlatform
+  template          String
+  captionTemplateId String?
+  status            SocialStatus   @default(PENDING)
+  scheduledAt       DateTime?
+  publishedAt       DateTime?
+  platformPostId    String?
+  error             String?
+  reach             Int?
+  impressions       Int?
+  engagement        Int?
+  createdAt         DateTime       @default(now())
 
   @@index([postId])
   @@index([accountId])
@@ -312,6 +316,7 @@ model CaptionTemplate {
   language        String         @default("sq")
   includeHashtags Boolean        @default(true)
   includeExcerpt  Boolean        @default(false)
+  includeContent  Boolean        @default(false)
   brandingText    String?
   emojiStyle      String         @default("category")
   categoryColors  Json?

@@ -28,6 +28,7 @@ export const sitesApi = {
   test:     (id: string) => api.post(`/sites/${id}/test`).then(r => r.data),
   fetchJwt: (id: string) => api.post(`/sites/${id}/fetch-jwt`).then(r => r.data),
   clearJwt: (id: string) => api.delete(`/sites/${id}/jwt`),
+  categories: (id: string) => api.get(`/sites/${id}/categories`).then(r => r.data),
 }
 
 export const sourcesApi = {
@@ -190,6 +191,6 @@ export const socialApi = {
   cancelPost:     (id: string) => api.delete(`/social/history/${id}`),
   analytics:      () => api.get('/social/analytics').then(r => r.data),
   analyticsTop:   () => api.get('/social/analytics/top').then(r => r.data),
-  previewCaption: (postId: string, accountId: string, template: string) =>
-    api.post('/social/preview-caption', { postId, accountId, template }).then(r => r.data),
+  previewCaption: (postId: string, accountId: string, template: string, captionTemplateId?: string) =>
+    api.post('/social/preview-caption', { postId, accountId, template, captionTemplateId }).then(r => r.data),
 }

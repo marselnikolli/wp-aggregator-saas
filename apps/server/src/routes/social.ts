@@ -9,10 +9,11 @@ const templateEnum = z.enum(['photo_comment', 'link_post', 'photo_only', 'text_l
 export async function socialRoutes(app: FastifyInstance) {
   app.post('/social/publish', { preHandler: [app.authenticate] }, async (req, reply) => {
     const body = z.object({
-      postId:      z.string(),
-      accountId:   z.string(),
-      template:    templateEnum,
-      scheduledAt: z.string().datetime().optional(),
+      postId:           z.string(),
+      accountId:        z.string(),
+      template:         templateEnum,
+      scheduledAt:      z.string().datetime().optional(),
+      captionTemplateId: z.string().optional(),
     }).parse(req.body)
 
     const account = await db.socialAccount.findUniqueOrThrow({ where: { id: body.accountId } })
@@ -34,10 +35,11 @@ export async function socialRoutes(app: FastifyInstance) {
     const status = body.scheduledAt ? 'SCHEDULED' : 'PENDING'
     const record = await db.socialPost.create({
       data: {
-        postId:      body.postId,
-        accountId:   body.accountId,
-        platform:    account.platform,
-        template:    body.template,
+        postId:           body.postId,
+        accountId:        body.accountId,
+        platform:         account.platform,
+        template:         body.template,
+        captionTemplateId: body.captionTemplateId ?? null,
         status,
         scheduledAt: body.scheduledAt ? new Date(body.scheduledAt) : undefined,
       },
@@ -198,16 +200,19 @@ export async function socialRoutes(app: FastifyInstance) {
 
   app.post('/social/preview-caption', { preHandler: [app.authenticate] }, async (req, reply) => {
     const body = z.object({
-      postId:    z.string(),
-      accountId: z.string(),
-      template:  templateEnum,
+      postId:           z.string(),
+      accountId:        z.string(),
+      template:         templateEnum,
+      captionTemplateId: z.string().optional(),
     }).parse(req.body)
 
     const [post, account] = await Promise.all([
       db.aggregatedPost.findUniqueOrThrow({ where: { id: body.postId } }),
       db.socialAccount.findUniqueOrThrow({ where: { id: body.accountId }, select: { platform: true, siteId: true } }),
     ])
-    const tmpl = await db.captionTemplate.findFirst({ where: { platform: account.platform } })
+    const tmpl = body.captionTemplateId
+      ? await db.captionTemplate.findUnique({ where: { id: body.captionTemplateId } })
+      : await db.captionTemplate.findFirst({ where: { platform: account.platform } })
 
     // Resolve best available URL: WP site URL if published, else originalUrl
     let postUrl = post.originalUrl ?? ''
@@ -228,6 +233,8 @@ export async function socialRoutes(app: FastifyInstance) {
       includeHashtags: tmpl?.includeHashtags ?? true,
       includeExcerpt:  tmpl?.includeExcerpt  ?? false,
       excerpt:         post.excerpt ?? undefined,
+      includeContent:  tmpl?.includeContent  ?? false,
+      content:         post.content ?? undefined,
       brandingText:    tmpl?.brandingText    ?? undefined,
       emojiStyle:      (tmpl?.emojiStyle as 'category' | 'none') ?? 'category',
     })
