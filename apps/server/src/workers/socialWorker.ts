@@ -148,6 +148,7 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       ? await db.captionTemplate.findUnique({ where: { id: record.captionTemplateId } })
       : await db.captionTemplate.findFirst({ where: { platform: record.account.platform } })
 
+    const isFullText = record.template === 'photo_full_text'
     const caption = generateCaption({
       title:           record.post.aiTitle ?? record.post.title,
       categories:      record.post.categories,
@@ -158,7 +159,7 @@ async function processSocialPost(socialPostId: string): Promise<void> {
       includeHashtags: captionTemplate?.includeHashtags ?? true,
       includeExcerpt:  captionTemplate?.includeExcerpt ?? false,
       excerpt:         record.post.excerpt ?? undefined,
-      includeContent:  captionTemplate?.includeContent ?? false,
+      includeContent:  isFullText || (captionTemplate?.includeContent ?? false),
       content:         record.post.content ?? undefined,
       brandingText:    captionTemplate?.brandingText ?? undefined,
       emojiStyle:      (captionTemplate?.emojiStyle as 'category' | 'none') ?? 'category',
@@ -194,6 +195,21 @@ async function processSocialPost(socialPostId: string): Promise<void> {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ url: record.post.imageUrl, caption: record.post.title, access_token: token }),
+        })
+        const data = await res.json() as any
+        if (data.error) throw new Error(data.error.message ?? 'Facebook API error')
+        platformPostId = data.id
+      }
+
+    } else if (template === 'photo_full_text') {
+      if (platform === 'INSTAGRAM') {
+        if (!record.post.imageUrl) throw new Error('Instagram photo_full_text requires a featured image')
+        platformPostId = await igPublishPhoto(pageId, record.post.imageUrl, caption, token)
+      } else {
+        const res = await fetch(`https://graph.facebook.com/v19.0/${pageId}/photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: record.post.imageUrl, caption, access_token: token }),
         })
         const data = await res.json() as any
         if (data.error) throw new Error(data.error.message ?? 'Facebook API error')

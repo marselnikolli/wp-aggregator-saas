@@ -4,7 +4,7 @@ import { db } from '../db.js'
 import { socialQueue } from '../workers/socialWorker.js'
 import { generateCaption } from '../lib/caption.js'
 
-const templateEnum = z.enum(['photo_comment', 'link_post', 'photo_only', 'text_link', 'image_overlay'])
+const templateEnum = z.enum(['photo_comment', 'link_post', 'photo_only', 'text_link', 'image_overlay', 'photo_full_text'])
 
 export async function socialRoutes(app: FastifyInstance) {
   app.post('/social/publish', { preHandler: [app.authenticate] }, async (req, reply) => {

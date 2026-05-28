@@ -22,11 +22,12 @@ import { RichTextEditor } from '@/components/RichTextEditor'
 const PER_PAGE = [10, 25, 50, 100] as const
 
 const SOCIAL_TEMPLATES = [
-  { value: 'photo_comment', label: 'Photo + Comment', needsSite: true  },
-  { value: 'link_post',     label: 'Link Post',       needsSite: true  },
-  { value: 'photo_only',   label: 'Photo Only',       needsSite: false },
-  { value: 'text_link',    label: 'Text + Link',      needsSite: true  },
-  { value: 'image_overlay',label: 'Image Overlay',    needsSite: false },
+  { value: 'photo_comment', label: 'Photo + Comment',  needsSite: true  },
+  { value: 'link_post',     label: 'Link Post',        needsSite: true  },
+  { value: 'photo_only',   label: 'Photo Only',        needsSite: false },
+  { value: 'photo_full_text', label: 'Photo + Full text', needsSite: true },
+  { value: 'text_link',    label: 'Text + Link',       needsSite: true  },
+  { value: 'image_overlay',label: 'Image Overlay',     needsSite: false },
 ] as const
 
 function SocialPostPreview({ post, template, caption }: { post: any; template: string; caption: string }) {
@@ -128,6 +129,32 @@ function SocialPostPreview({ post, template, caption }: { post: any; template: s
             <span>❤</span><span>💬</span><span>↗</span>
           </div>
           {caption && <p className="text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>}
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'photo_full_text') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {img ? (
+          <img src={img} alt="" className="w-full aspect-square object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        ) : (
+          <div className="w-full aspect-square bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+        )}
+        <div className="px-3 py-2.5 space-y-1">
+          <div className="flex gap-3 text-muted-foreground">
+            <span>❤</span><span>💬</span><span>↗</span>
+          </div>
+          {caption && <p className="text-xs whitespace-pre-wrap line-clamp-6">{caption}</p>}
         </div>
       </div>
     )
@@ -276,14 +303,14 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
-        <div className="space-y-4 py-2">
+        <div className="space-y-3 py-1">
           <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
 
           {/* Destination URL info */}
           {post?.publishTasks?.length > 0 && (
-            <div className="rounded-md border border-teal-500/30 bg-teal-500/5 px-3 py-2">
+            <div className="rounded-md border border-teal-500/30 bg-teal-500/5 px-2.5 py-1.5">
               <p className="text-xs text-teal-400 font-medium mb-0.5">Published to destination site</p>
               {post.publishTasks.map((t: any) => (
                 <p key={t.site?.id ?? t.wpUrl} className="text-xs text-muted-foreground truncate">
@@ -293,12 +320,12 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
             </div>
           )}
 
-          <div className="grid gap-1.5">
+          <div className="grid gap-1">
             <Label className="text-xs">Account</Label>
             <select
               value={accountId}
               onChange={e => setAccountId(e.target.value)}
-              className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">Select account…</option>
               {(accounts ?? []).filter((a: any) => a.enabled).map((a: any) => (
@@ -309,7 +336,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
           {/* Not published warning */}
           {accountId && selectedAccount?.siteId && !isPublishedToAccountSite && (
-            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
               <p className="text-xs text-amber-400 font-medium">
                 Post not published to {selectedAccount.name}'s destination site
               </p>
@@ -321,7 +348,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
           {/* No site linked warning */}
           {accountId && selectedAccount && !selectedAccount.siteId && (
-            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5">
               <p className="text-xs text-destructive font-medium">
                 No destination site linked
               </p>
@@ -334,20 +361,20 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
           {/* Destination URL for selected account */}
           {accountId && destinationUrl && (
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Destination URL being shared</Label>
-              <p className="text-xs text-muted-foreground truncate bg-secondary/50 rounded px-2 py-1.5 border border-border">
+            <div className="grid gap-1">
+              <Label className="text-xs">Destination URL</Label>
+              <p className="text-xs text-muted-foreground truncate bg-secondary/50 rounded px-2 py-1 border border-border">
                 {destinationUrl}
               </p>
             </div>
           )}
 
-          <div className="grid gap-1.5">
+          <div className="grid gap-1">
             <Label className="text-xs">Template</Label>
             <select
               value={template}
               onChange={e => setTemplate(e.target.value)}
-              className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               {availableTemplates.map(t => (
                 <option key={t.value} value={t.value}>{t.label}</option>
@@ -362,12 +389,12 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
           </div>
 
           {accountId && platformTemplates.length > 0 && (
-            <div className="grid gap-1.5">
-              <Label className="text-xs">Caption template</Label>
+            <div className="grid gap-1">
+              <Label className="text-xs">Caption formatting</Label>
               <select
                 value={captionTemplateId}
                 onChange={e => setCaptionTemplateId(e.target.value)}
-                className="h-9 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                className="h-8 w-full rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value="">Default</option>
                 {platformTemplates.map((t: any) => (
@@ -377,20 +404,20 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
             </div>
           )}
 
-          <div className="grid gap-1.5">
+          <div className="grid gap-1">
             <Label className="text-xs">
-              Schedule <span className="text-muted-foreground">(optional — leave blank to post now)</span>
+              Schedule <span className="text-muted-foreground">(optional)</span>
             </Label>
             <input
               type="datetime-local"
               value={scheduledAt}
               onChange={e => setScheduledAt(e.target.value)}
-              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
             />
           </div>
 
           {accountId && (
-            <div className="grid gap-2">
+            <div className="grid gap-1.5">
               <Label className="text-xs flex items-center gap-1.5">
                 Live preview
                 {captionLoading && <Loader2 className="h-3 w-3 animate-spin" />}
