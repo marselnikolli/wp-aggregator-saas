@@ -214,9 +214,9 @@ function SourceAccordion({
                   ? `${mapping.destCategoryId}@@${mapping.destCategoryName ?? ''}`
                   : ''
                 return (
-                  <label
+                  <div
                     key={cat}
-                    className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                    className={`flex items-center gap-2 px-3 py-2 transition-colors ${
                       isSelected ? 'bg-primary/5' : 'hover:bg-secondary/30'
                     }`}
                   >
@@ -224,21 +224,20 @@ function SourceAccordion({
                       type="checkbox"
                       checked={isSelected}
                       onChange={e => onToggle(sourceId, cat, e.target.checked)}
-                      className="rounded shrink-0"
+                      className="rounded shrink-0 cursor-pointer"
                     />
-                    <span className={`flex-1 text-sm font-mono truncate ${
+                    <span className={`flex-1 min-w-0 text-sm font-mono truncate ${
                       isSelected ? 'text-foreground' : 'text-muted-foreground'
                     }`}>
                       {cat}
                     </span>
                     {isSelected && (
                       <>
-                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                        <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
                         <select
                           value={currentDest}
                           onChange={e => onDestChange(sourceId, cat, e.target.value || null)}
-                          onClick={e => e.stopPropagation()}
-                          className="h-8 w-48 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer shrink-0"
+                          className="h-7 w-40 min-w-0 rounded border border-border bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring cursor-pointer shrink-0"
                         >
                           <option value="">Pass as-is</option>
                           {destCategories.map(dc => (
@@ -250,7 +249,7 @@ function SourceAccordion({
                         </select>
                       </>
                     )}
-                  </label>
+                  </div>
                 )
               })}
             </div>
@@ -423,344 +422,266 @@ export function PipelineEditor() {
     <div className="flex flex-col h-full">
 
       {/* ── Sticky top bar ── */}
-      <div className="shrink-0 flex items-center gap-3 px-6 py-3 border-b border-border bg-background z-10">
+      <div className="shrink-0 flex items-center gap-2 px-4 py-2.5 border-b border-border bg-background z-10 min-w-0">
         <Button
           variant="ghost" size="sm"
           onClick={() => navigate('/pipelines')}
-          className="gap-1.5 text-muted-foreground shrink-0"
+          className="gap-1.5 text-muted-foreground shrink-0 px-2"
         >
-          <ArrowLeft className="h-4 w-4" /> Pipelines
+          <ArrowLeft className="h-4 w-4" />
+          <span className="hidden sm:inline">Pipelines</span>
         </Button>
         <div className="h-4 w-px bg-border shrink-0" />
         <Input
           value={form.name}
           onChange={e => set('name', e.target.value)}
           placeholder="Pipeline name…"
-          className="w-64 h-8 text-sm font-medium"
+          className="w-40 sm:w-56 h-8 text-sm font-medium min-w-0"
         />
-        <div className="ml-auto flex items-center gap-3 shrink-0">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <Switch checked={form.enabled} onCheckedChange={v => set('enabled', v)} />
-            <span className="text-sm text-muted-foreground">Enabled</span>
-          </label>
-          <div className="h-4 w-px bg-border" />
+        <div className="ml-auto flex items-center gap-2 shrink-0">
+          <Switch checked={form.enabled} onCheckedChange={v => set('enabled', v)} />
+          <span className="text-sm text-muted-foreground hidden sm:inline">Enabled</span>
+          <div className="h-4 w-px bg-border mx-1" />
           <Button variant="outline" size="sm" onClick={() => navigate('/pipelines')}>Cancel</Button>
           <Button size="sm" onClick={handleSave} disabled={!canSave || isSaving}>
             {isSaving
-              ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
-              : <Save className="h-4 w-4 mr-1.5" />}
-            {!form.name.trim() ? 'Name required' : !form.siteIds.length ? 'Select a site' : 'Save pipeline'}
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Save className="h-4 w-4" />}
+            <span className="ml-1.5 hidden sm:inline">
+              {!form.name.trim() ? 'Name required' : !form.siteIds.length ? 'Select a site' : 'Save'}
+            </span>
           </Button>
         </div>
       </div>
 
       {/* ── Scrollable body ── */}
-      <div className="flex-1 overflow-y-auto bg-secondary/10">
-        <div className="max-w-2xl mx-auto px-4 py-6 space-y-4">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden bg-secondary/10">
+        <div className="max-w-5xl mx-auto px-4 py-5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
 
-          {/* ── 1. Basic settings ── */}
-          <FormCard icon={Settings2} title="Basic Settings">
-            {/* Target sites */}
-            <div className="space-y-1.5">
-              <Label>Target sites <span className="text-muted-foreground font-normal text-xs">— where posts are published</span></Label>
-              <div className="border border-border rounded-lg divide-y divide-border/50">
-                {(sites as any[]).map((site: any) => (
-                  <label key={site.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-secondary/40 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={form.siteIds.includes(site.id)}
-                      onChange={() => toggleSite(site.id)}
-                      className="rounded"
-                    />
-                    <span className="text-sm">{site.name}</span>
-                  </label>
-                ))}
-                {!(sites as any[]).length && (
-                  <p className="px-4 py-3 text-sm text-muted-foreground">No sites configured yet.</p>
-                )}
-              </div>
-            </div>
+            {/* ── Left column: settings ── */}
+            <div className="space-y-3 min-w-0">
 
-            {/* Post status */}
-            <div className="space-y-1.5">
-              <Label>Post status</Label>
-              <div className="flex gap-2">
-                {(['publish', 'draft'] as const).map(s => (
-                  <button key={s} type="button"
-                    onClick={() => set('defaultStatus', s)}
-                    className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${
-                      form.defaultStatus === s
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:border-primary/40'
-                    }`}>
-                    {s.charAt(0).toUpperCase() + s.slice(1)}
-                  </button>
-                ))}
-              </div>
-            </div>
+              {/* 1. Basic settings */}
+              <FormCard icon={Settings2} title="Basic Settings">
+                <div className="space-y-1.5">
+                  <Label>Target sites <span className="text-muted-foreground font-normal text-xs">— where posts are published</span></Label>
+                  <div className="border border-border rounded-lg divide-y divide-border/50">
+                    {(sites as any[]).map((site: any) => (
+                      <label key={site.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-secondary/40 transition-colors">
+                        <input type="checkbox" checked={form.siteIds.includes(site.id)} onChange={() => toggleSite(site.id)} className="rounded" />
+                        <span className="text-sm">{site.name}</span>
+                      </label>
+                    ))}
+                    {!(sites as any[]).length && <p className="px-4 py-3 text-sm text-muted-foreground">No sites configured yet.</p>}
+                  </div>
+                </div>
 
-            {/* Auto-publish */}
-            <label className="flex items-start gap-3 cursor-pointer">
-              <Switch checked={form.autoPublish} onCheckedChange={v => set('autoPublish', v)} className="mt-0.5 shrink-0" />
-              <div>
-                <p className="text-sm font-medium">Auto-publish on scheduled run</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Manual "Run now" always works regardless of this setting.</p>
-              </div>
-            </label>
-          </FormCard>
+                <div className="space-y-1.5">
+                  <Label>Post status</Label>
+                  <div className="flex gap-2">
+                    {(['publish', 'draft'] as const).map(s => (
+                      <button key={s} type="button" onClick={() => set('defaultStatus', s)}
+                        className={`flex-1 rounded-lg border py-2 text-sm font-medium transition-colors ${form.defaultStatus === s ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+                        {s.charAt(0).toUpperCase() + s.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-          {/* ── 2. Sources & category mapping ── */}
-          <FormCard icon={Database} title="Sources & Category Mapping">
-            {/* Source picker */}
-            <div className="space-y-1.5">
-              <Label>
-                Sources
-                <span className="text-muted-foreground font-normal text-xs ml-1.5">— leave all unchecked to include every source</span>
-              </Label>
-              <div className="border border-border rounded-lg divide-y divide-border/50 max-h-52 overflow-y-auto">
-                {sources.map((s: any) => (
-                  <label key={s.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-secondary/40 transition-colors">
-                    <input
-                      type="checkbox"
-                      checked={selectedSourceIds.includes(s.id)}
-                      onChange={() => toggleSource(s.id)}
-                      className="rounded"
-                    />
-                    <span className="text-sm">{s.name}</span>
-                  </label>
-                ))}
-                {!sources.length && (
-                  <p className="px-4 py-3 text-sm text-muted-foreground">No sources yet.</p>
-                )}
-              </div>
-            </div>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <Switch checked={form.autoPublish} onCheckedChange={v => set('autoPublish', v)} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium">Auto-publish on scheduled run</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Manual "Run now" always works regardless of this setting.</p>
+                  </div>
+                </label>
+              </FormCard>
 
-            {/* Per-source accordions */}
-            {selectedSourceIds.length > 0 && (
-              <div className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <Label className="flex items-center gap-1.5">
-                    <ListTree className="h-3.5 w-3.5 text-muted-foreground" />
-                    Category mapping
-                    <span className="font-normal text-xs text-muted-foreground">— pick which categories to include and where to map them</span>
-                  </Label>
-                  {!form.siteIds.length && (
-                    <span className="text-xs text-amber-500 shrink-0">Select target sites to enable</span>
+              {/* 2. Filters */}
+              <FormCard icon={Tag} title="Filters">
+                <div className="space-y-1.5">
+                  <Label>Category filter <span className="text-muted-foreground font-normal text-xs">(Enter or comma to add)</span></Label>
+                  <TagInput values={form.categoryFilter} onChange={v => set('categoryFilter', v)} placeholder="e.g. sport, tech, politics…" />
+                  <p className="text-xs text-muted-foreground">Only posts tagged with at least one of these categories will be processed.</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 min-w-0">
+                  <div className="space-y-1.5 min-w-0">
+                    <Label className="text-xs">Min quality score <span className="text-muted-foreground font-normal">(0 = off)</span></Label>
+                    <Input type="number" min={0} max={100} value={form.qualityMin} onChange={e => set('qualityMin', Number(e.target.value))} className="w-full" />
+                  </div>
+                  <div className="space-y-1.5 min-w-0">
+                    <Label className="text-xs">Fallback category <span className="text-muted-foreground font-normal">(no match)</span></Label>
+                    <Input value={form.targetCategory ?? ''} onChange={e => set('targetCategory', e.target.value || null)} placeholder="e.g. Lajme" className="w-full" />
+                  </div>
+                </div>
+              </FormCard>
+
+              {/* 3. Publishing schedule */}
+              <FormCard icon={Clock} title="Publishing Schedule">
+                <div className="space-y-1.5">
+                  <Label>Schedule <span className="text-muted-foreground font-normal text-xs">(blank = manual only)</span></Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SCHEDULE_PRESETS.map(p => (
+                      <button key={p.value} type="button" onClick={() => set('schedule', form.schedule === p.value ? null : p.value)}
+                        className={`text-xs rounded-full border px-3 py-1 transition-colors ${form.schedule === p.value ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/50'}`}>
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  <Input value={form.schedule ?? ''} placeholder="Custom cron, e.g. 0 8 * * *" onChange={e => set('schedule', e.target.value || null)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3 min-w-0">
+                  <div className="space-y-1.5 min-w-0">
+                    <Label className="text-xs">Publish window <span className="text-muted-foreground font-normal">(hours, 0 = all)</span></Label>
+                    <Input type="number" min={0} max={168} value={form.publishWindowHours} onChange={e => set('publishWindowHours', Number(e.target.value))} className="w-full" />
+                  </div>
+                  <div className="space-y-1.5 min-w-0">
+                    <Label className="text-xs">Max posts per run</Label>
+                    <Input type="number" min={1} max={500} value={form.postLimit} onChange={e => set('postLimit', Math.max(1, Math.min(500, Number(e.target.value))))} className="w-full" />
+                  </div>
+                </div>
+              </FormCard>
+
+              {/* 4. Translation & routing */}
+              <FormCard icon={Languages} title="Translation & Routing">
+                <div className="space-y-1.5">
+                  <Label>Translate content to</Label>
+                  <select value={form.translateTo ?? ''} onChange={e => set('translateTo', e.target.value || null)}
+                    className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                    <option value="">No translation</option>
+                    {LANGUAGE_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Language-based site routing</Label>
+                  <p className="text-xs text-muted-foreground">Route posts by detected language to specific sites.</p>
+                  {unusedLanguages.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {unusedLanguages.map(l => (
+                        <button key={l.value} type="button" onClick={() => addLangMapping(l.value)}
+                          className="text-xs rounded-full border border-dashed border-border px-2.5 py-1 text-muted-foreground hover:border-primary hover:text-primary transition-colors">
+                          + {l.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {Object.keys(langMapping).length > 0 && (
+                    <div className="space-y-2 border border-border rounded-lg p-3">
+                      {Object.entries(langMapping).map(([code, siteIds]) => (
+                        <div key={code} className="rounded-md bg-secondary/40 p-2.5">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-semibold">{LANGUAGE_OPTIONS.find(l => l.value === code)?.label ?? code}</span>
+                            <button type="button" onClick={() => removeLangMapping(code)} className="text-muted-foreground hover:text-destructive">
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(sites as any[]).map((site: any) => (
+                              <button key={site.id} type="button" onClick={() => setLangSites(code, site.id, !siteIds.includes(site.id))}
+                                className={`text-xs rounded px-2 py-0.5 border transition-colors ${siteIds.includes(site.id) ? 'border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:border-primary/40'}`}>
+                                {site.name}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
+              </FormCard>
 
-                <div className="space-y-2">
-                  {selectedSourceIds.map(sid => {
-                    const src = sources.find((s: any) => s.id === sid)
-                    if (!src) return null
-                    return (
-                      <SourceAccordion
-                        key={sid}
-                        sourceId={sid}
-                        sourceName={src.name}
-                        destCategories={allDestCategories}
-                        mappings={categoryMappings}
-                        onToggle={toggleCategorySelection}
-                        onDestChange={updateCategoryDest}
-                      />
-                    )
-                  })}
+              {/* 5. AI & Content */}
+              <FormCard icon={Sparkles} title="AI & Content">
+                <div className="space-y-1.5">
+                  <Label>AI rewrite instruction <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                  <textarea rows={4} placeholder="e.g. Rewrite as a concise 3-paragraph news article in formal Albanian"
+                    value={form.aiPrompt ?? ''} onChange={e => set('aiPrompt', e.target.value || null)}
+                    className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none" />
                 </div>
+              </FormCard>
 
-                {categoryMappings.length > 0 && (
-                  <p className="text-xs text-muted-foreground pt-1">
-                    {categoryMappings.length} categor{categoryMappings.length !== 1 ? 'ies' : 'y'} selected — posts not matching any selected category are skipped.
-                  </p>
+              {/* 6. Social sharing */}
+              <FormCard icon={Share2} title="Social Sharing">
+                <div className="space-y-1.5">
+                  <Label>Auto-share account <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+                  <select value={form.socialAccountId ?? ''} onChange={e => setForm(p => ({ ...p, socialAccountId: e.target.value || null, socialTemplate: e.target.value ? (p.socialTemplate ?? 'link_post') : null }))}
+                    className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                    <option value="">No social sharing</option>
+                    {(socialAccounts as any[]).filter((a: any) => a.enabled).map((a: any) => (
+                      <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
+                    ))}
+                  </select>
+                </div>
+                {form.socialAccountId && (
+                  <div className="space-y-1.5">
+                    <Label>Post template</Label>
+                    <select value={form.socialTemplate ?? 'link_post'} onChange={e => set('socialTemplate', e.target.value)}
+                      className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                      {SOCIAL_TEMPLATES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
                 )}
-              </div>
-            )}
-          </FormCard>
+              </FormCard>
 
-          {/* ── 3. Filters ── */}
-          <FormCard icon={Tag} title="Filters">
-            <div className="space-y-1.5">
-              <Label>Category filter <span className="text-muted-foreground font-normal text-xs">(Enter or comma to add)</span></Label>
-              <TagInput
-                values={form.categoryFilter}
-                onChange={v => set('categoryFilter', v)}
-                placeholder="e.g. sport, tech, politics…"
-              />
-              <p className="text-xs text-muted-foreground">Only posts tagged with at least one of these categories will be processed.</p>
-            </div>
+            </div>{/* end left column */}
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Min quality score <span className="text-muted-foreground font-normal text-xs">(0 = no filter)</span></Label>
-                <Input
-                  type="number" min={0} max={100}
-                  value={form.qualityMin}
-                  onChange={e => set('qualityMin', Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Fallback category <span className="text-muted-foreground font-normal text-xs">(when no mapping matches)</span></Label>
-                <Input
-                  value={form.targetCategory ?? ''}
-                  onChange={e => set('targetCategory', e.target.value || null)}
-                  placeholder="e.g. Lajme"
-                />
-              </div>
-            </div>
-          </FormCard>
-
-          {/* ── 4. Publishing schedule ── */}
-          <FormCard icon={Clock} title="Publishing Schedule">
-            <div className="space-y-1.5">
-              <Label>Schedule <span className="text-muted-foreground font-normal text-xs">(blank = manual only)</span></Label>
-              <div className="flex flex-wrap gap-1.5">
-                {SCHEDULE_PRESETS.map(p => (
-                  <button key={p.value} type="button"
-                    onClick={() => set('schedule', form.schedule === p.value ? null : p.value)}
-                    className={`text-xs rounded-full border px-3 py-1 transition-colors ${
-                      form.schedule === p.value
-                        ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:border-primary/50'
-                    }`}>
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-              <Input
-                value={form.schedule ?? ''}
-                placeholder="Custom cron, e.g. 0 8 * * *"
-                onChange={e => set('schedule', e.target.value || null)}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Publish window <span className="text-muted-foreground font-normal text-xs">(hours, 0 = all at once)</span></Label>
-                <Input
-                  type="number" min={0} max={168}
-                  value={form.publishWindowHours}
-                  onChange={e => set('publishWindowHours', Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Max posts per run</Label>
-                <Input
-                  type="number" min={1} max={500}
-                  value={form.postLimit}
-                  onChange={e => set('postLimit', Math.max(1, Math.min(500, Number(e.target.value))))}
-                />
-              </div>
-            </div>
-          </FormCard>
-
-          {/* ── 5. Translation & routing ── */}
-          <FormCard icon={Languages} title="Translation & Routing">
-            <div className="space-y-1.5">
-              <Label>Translate content to</Label>
-              <select
-                value={form.translateTo ?? ''}
-                onChange={e => set('translateTo', e.target.value || null)}
-                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">No translation</option>
-                {LANGUAGE_OPTIONS.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Language-based site routing</Label>
-              <p className="text-xs text-muted-foreground">Route posts by detected language to specific sites.</p>
-              {unusedLanguages.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {unusedLanguages.map(l => (
-                    <button key={l.value} type="button" onClick={() => addLangMapping(l.value)}
-                      className="text-xs rounded-full border border-dashed border-border px-2.5 py-1 text-muted-foreground hover:border-primary hover:text-primary transition-colors">
-                      + {l.label}
-                    </button>
-                  ))}
+            {/* ── Right column: sources & category mapping ── */}
+            <div className="min-w-0 lg:sticky lg:top-4">
+              <FormCard icon={Database} title="Sources & Category Mapping">
+                <div className="space-y-1.5">
+                  <Label>Sources <span className="text-muted-foreground font-normal text-xs">— leave all unchecked to include every source</span></Label>
+                  <div className="border border-border rounded-lg divide-y divide-border/50 max-h-52 overflow-y-auto">
+                    {sources.map((s: any) => (
+                      <label key={s.id} className="flex items-center gap-3 px-4 py-2.5 cursor-pointer hover:bg-secondary/40 transition-colors">
+                        <input type="checkbox" checked={selectedSourceIds.includes(s.id)} onChange={() => toggleSource(s.id)} className="rounded" />
+                        <span className="text-sm">{s.name}</span>
+                      </label>
+                    ))}
+                    {!sources.length && <p className="px-4 py-3 text-sm text-muted-foreground">No sources yet.</p>}
+                  </div>
                 </div>
-              )}
-              {Object.keys(langMapping).length > 0 && (
-                <div className="space-y-2 border border-border rounded-lg p-3">
-                  {Object.entries(langMapping).map(([code, siteIds]) => (
-                    <div key={code} className="rounded-md bg-secondary/40 p-2.5">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-semibold">
-                          {LANGUAGE_OPTIONS.find(l => l.value === code)?.label ?? code}
-                        </span>
-                        <button type="button" onClick={() => removeLangMapping(code)}
-                          className="text-muted-foreground hover:text-destructive">
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(sites as any[]).map((site: any) => (
-                          <button key={site.id} type="button"
-                            onClick={() => setLangSites(code, site.id, !siteIds.includes(site.id))}
-                            className={`text-xs rounded px-2 py-0.5 border transition-colors ${
-                              siteIds.includes(site.id)
-                                ? 'border-primary bg-primary/10 text-primary'
-                                : 'border-border text-muted-foreground hover:border-primary/40'
-                            }`}>
-                            {site.name}
-                          </button>
-                        ))}
-                      </div>
+
+                {selectedSourceIds.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label className="flex items-center gap-1.5">
+                        <ListTree className="h-3.5 w-3.5 text-muted-foreground" />
+                        Category mapping
+                      </Label>
+                      {!form.siteIds.length && <span className="text-xs text-amber-500 shrink-0">Select target sites first</span>}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </FormCard>
+                    <p className="text-xs text-muted-foreground -mt-1">Pick which categories to include and optionally remap them to a destination category.</p>
 
-          {/* ── 6. AI & Content ── */}
-          <FormCard icon={Sparkles} title="AI & Content">
-            <div className="space-y-1.5">
-              <Label>AI rewrite instruction <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-              <textarea
-                rows={4}
-                placeholder="e.g. Rewrite as a concise 3-paragraph news article in formal Albanian"
-                value={form.aiPrompt ?? ''}
-                onChange={e => set('aiPrompt', e.target.value || null)}
-                className="w-full rounded-md border border-border bg-secondary px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring resize-none"
-              />
-            </div>
-          </FormCard>
+                    <div className="space-y-2">
+                      {selectedSourceIds.map(sid => {
+                        const src = sources.find((s: any) => s.id === sid)
+                        if (!src) return null
+                        return (
+                          <SourceAccordion
+                            key={sid}
+                            sourceId={sid}
+                            sourceName={src.name}
+                            destCategories={allDestCategories}
+                            mappings={categoryMappings}
+                            onToggle={toggleCategorySelection}
+                            onDestChange={updateCategoryDest}
+                          />
+                        )
+                      })}
+                    </div>
 
-          {/* ── 7. Social sharing ── */}
-          <FormCard icon={Share2} title="Social Sharing">
-            <div className="space-y-1.5">
-              <Label>Auto-share account <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
-              <select
-                value={form.socialAccountId ?? ''}
-                onChange={e => setForm(p => ({
-                  ...p,
-                  socialAccountId: e.target.value || null,
-                  socialTemplate: e.target.value ? (p.socialTemplate ?? 'link_post') : null,
-                }))}
-                className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">No social sharing</option>
-                {(socialAccounts as any[]).filter((a: any) => a.enabled).map((a: any) => (
-                  <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
-                ))}
-              </select>
-            </div>
+                    {categoryMappings.length > 0 && (
+                      <p className="text-xs text-muted-foreground pt-1">
+                        {categoryMappings.length} categor{categoryMappings.length !== 1 ? 'ies' : 'y'} selected — posts not matching any selected category are skipped.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </FormCard>
+            </div>{/* end right column */}
 
-            {form.socialAccountId && (
-              <div className="space-y-1.5">
-                <Label>Post template</Label>
-                <select
-                  value={form.socialTemplate ?? 'link_post'}
-                  onChange={e => set('socialTemplate', e.target.value)}
-                  className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                >
-                  {SOCIAL_TEMPLATES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                </select>
-              </div>
-            )}
-          </FormCard>
-
-          {/* Bottom padding */}
+          </div>{/* end grid */}
           <div className="h-4" />
         </div>
       </div>
