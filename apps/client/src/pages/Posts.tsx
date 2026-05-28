@@ -303,9 +303,9 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
-        <div className="space-y-3 py-1">
+        <div className="space-y-3 px-1 min-w-0">
           <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
 
           {/* Destination URL info */}
@@ -320,12 +320,12 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
             </div>
           )}
 
-          <div className="grid gap-1">
+          <div className="grid gap-1 min-w-0">
             <Label className="text-xs">Account</Label>
             <select
               value={accountId}
               onChange={e => setAccountId(e.target.value)}
-              className="h-8 w-full rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full min-w-0 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="">Select account…</option>
               {(accounts ?? []).filter((a: any) => a.enabled).map((a: any) => (
@@ -361,7 +361,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
 
           {/* Destination URL for selected account */}
           {accountId && destinationUrl && (
-            <div className="grid gap-1">
+            <div className="grid gap-1 min-w-0">
               <Label className="text-xs">Destination URL</Label>
               <p className="text-xs text-muted-foreground truncate bg-secondary/50 rounded px-2 py-1 border border-border">
                 {destinationUrl}
@@ -369,12 +369,12 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
             </div>
           )}
 
-          <div className="grid gap-1">
+          <div className="grid gap-1 min-w-0">
             <Label className="text-xs">Template</Label>
             <select
               value={template}
               onChange={e => setTemplate(e.target.value)}
-              className="h-8 w-full rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              className="h-8 w-full min-w-0 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               {availableTemplates.map(t => (
                 <option key={t.value} value={t.value}>{t.label}</option>
@@ -389,12 +389,12 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
           </div>
 
           {accountId && platformTemplates.length > 0 && (
-            <div className="grid gap-1">
+            <div className="grid gap-1 min-w-0">
               <Label className="text-xs">Caption formatting</Label>
               <select
                 value={captionTemplateId}
                 onChange={e => setCaptionTemplateId(e.target.value)}
-                className="h-8 w-full rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                className="h-8 w-full min-w-0 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value="">Default</option>
                 {platformTemplates.map((t: any) => (
@@ -404,7 +404,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
             </div>
           )}
 
-          <div className="grid gap-1">
+          <div className="grid gap-1 min-w-0">
             <Label className="text-xs">
               Schedule <span className="text-muted-foreground">(optional)</span>
             </Label>
@@ -422,7 +422,7 @@ function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClos
                 Live preview
                 {captionLoading && <Loader2 className="h-3 w-3 animate-spin" />}
               </Label>
-              <div className="flex justify-center">
+              <div className="flex justify-center overflow-hidden">
                 <SocialPostPreview post={post} template={template} caption={caption} />
               </div>
             </div>
