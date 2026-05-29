@@ -297,20 +297,33 @@ const CF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHT
 
 const SCRAPLING_PROXY = `http://127.0.0.1:${process.env.SCRAPLING_PROXY_PORT ?? '3002'}`
 
-async function fetchViaScrapling(url: string): Promise<string> {
+async function scraplingAction<T = any>(action: string, url: string): Promise<T | null> {
   try {
     const res = await fetch(SCRAPLING_PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ action, url }),
       signal: AbortSignal.timeout(60000),
     })
-    if (!res.ok) return ''
-    const data = await res.json() as { success: boolean; html: string }
-    return data.success ? data.html : ''
+    if (!res.ok) return null
+    const data = await res.json() as T & { success: boolean }
+    return data.success ? data : null
   } catch {
-    return ''
+    return null
   }
+}
+
+async function fetchViaScrapling(url: string): Promise<string> {
+  const data = await scraplingAction<{ html: string }>('fetch', url)
+  return data?.html ?? ''
+}
+
+async function parseListingViaScrapling(url: string): Promise<{ items: any[]; html?: string } | null> {
+  return scraplingAction<{ items: any[] }>('parse_listing', url)
+}
+
+async function parseArticleViaScrapling(url: string): Promise<{ content: string; excerpt: string; imageUrl: string | null } | null> {
+  return scraplingAction<{ content: string; excerpt: string; imageUrl: string | null }>('parse_article', url)
 }
 
 async function fetchWithFallback(url: string, headers: Record<string, string>, dispatcher?: any): Promise<{ text: string; ok: boolean }> {
@@ -427,11 +440,20 @@ async function fetchCustomApi(source: {
 
       let items: unknown[] = []
       let isHtml = false
-      const fetched = await fetchWithFallback(url, headers, dispatcher)
-      if (!fetched.ok || !fetched.text) break
-      const parsed = tryParseBody(fetched.text)
-      items = parsed.items
-      isHtml = parsed.isHtml
+
+      // Try Python Scrapling for adaptive listing parsing first
+      const scraplingResult = await parseListingViaScrapling(url)
+      if (scraplingResult?.items?.length) {
+        items = scraplingResult.items
+        isHtml = true
+      } else {
+        // Fall back to Node-based fetch + cheerio parsing
+        const fetched = await fetchWithFallback(url, headers, dispatcher)
+        if (!fetched.ok || !fetched.text) break
+        const parsed = tryParseBody(fetched.text)
+        items = parsed.items
+        isHtml = parsed.isHtml
+      }
 
       if (!items.length) break
 
@@ -458,11 +480,19 @@ async function fetchCustomApi(source: {
 
         if (isHtml && !content && typeof resolved.url === 'string' && resolved.url) {
           if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
-          const scraped = await fetchArticleContent(resolved.url, dispatcher, ua)
-          content = scraped.content
-          if (!excerpt) excerpt = scraped.excerpt
-          // Use scraped image if the listing didn't provide one
-          if (!imageUrl && scraped.imageUrl) imageUrl = scraped.imageUrl
+          // Try Python Scrapling for article content first
+          const scrapedArticle = await parseArticleViaScrapling(resolved.url)
+          if (scrapedArticle?.content) {
+            content = scrapedArticle.content
+            if (!excerpt) excerpt = scrapedArticle.excerpt
+            if (!imageUrl && scrapedArticle.imageUrl) imageUrl = scrapedArticle.imageUrl
+          } else {
+            // Fall back to Node-based article scraping
+            const scraped = await fetchArticleContent(resolved.url, dispatcher, ua)
+            content = scraped.content
+            if (!excerpt) excerpt = scraped.excerpt
+            if (!imageUrl && scraped.imageUrl) imageUrl = scraped.imageUrl
+          }
         }
 
         results.push({
