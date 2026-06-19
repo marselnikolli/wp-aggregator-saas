@@ -8,3 +8,26 @@ Thumbs.db
 .vscode/
 *.swp
 prisma/migrations/dev/
+
+# Dependencies
+.pnpm-store/
+
+# TypeScript
+*.tsbuildinfo
+
+# Build output
+apps/server/dist/
+apps/client/dist/
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment overrides
+.env.*.local
+
+# Test coverage
+coverage/
+.claude
+.codex
