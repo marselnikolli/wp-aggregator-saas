@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify'
 import { db } from '../db.js'
 import { fetchQueue, publishQueue } from '../queue.js'
 import { summarizeQueue } from '../workers/summarizer.js'
+import { socialQueue } from '../workers/socialWorker.js'
 
 export async function dashboardRoutes(app: FastifyInstance) {
   app.get('/dashboard/stats', { preHandler: [app.authenticate] }, async () => {
@@ -140,11 +141,12 @@ export async function dashboardRoutes(app: FastifyInstance) {
   })
 
   app.get('/dashboard/queues', { preHandler: [app.authenticate] }, async () => {
-    const [f, p, s] = await Promise.all([
-      fetchQueue.getJobCounts('waiting', 'active', 'failed'),
-      publishQueue.getJobCounts('waiting', 'active', 'failed'),
-      summarizeQueue.getJobCounts('waiting', 'active', 'failed'),
+    const [f, p, s, so] = await Promise.all([
+      fetchQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
+      publishQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
+      summarizeQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
+      socialQueue.getJobCounts('waiting', 'active', 'failed', 'completed'),
     ])
-    return { fetch: f, publish: p, summarize: s }
+    return { fetch: f, publish: p, summarize: s, social: so }
   })
 }

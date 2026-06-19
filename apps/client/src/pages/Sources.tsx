@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, RefreshCw, Rss, Zap, Loader2, Upload, FileUp, ChevronLeft, ChevronRight, CheckCircle, XCircle, Pencil, Search, Code2, Globe, Activity, ChevronDown, ChevronUp, GripVertical } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
-import { sourcesApi, sitesApi } from '@/lib/api'
+import { sourcesApi, sitesApi, postsApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -370,6 +370,7 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
     username:    source.username ?? '',
     password:    '',
     tags:         (source.tags ?? []) as string[],
+    group:        source.group ?? '',
     minDelaySec:  source.minDelaySec ?? 1,
     userAgent:    source.userAgent ?? '',
     proxyUrl:     source.proxyUrl ?? '',
@@ -400,6 +401,7 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
         interval:    form.interval || null,
         username:    form.username || null,
         tags:         form.tags,
+        group:        form.group || null,
         minDelaySec:  form.minDelaySec,
         userAgent:    form.userAgent || null,
         proxyUrl:     form.proxyUrl || null,
@@ -441,6 +443,11 @@ function EditSourceDialog({ source, onClose }: { source: any; onClose: () => voi
           <div className="grid gap-1.5">
             <Label>Name</Label>
             <Input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
+          </div>
+          <div className="grid gap-1.5">
+            <Label className="text-xs">Group <span className="text-muted-foreground">(for filtering)</span></Label>
+            <Input placeholder="e.g. Politics, Sports, Tech" className="text-xs h-8" value={form.group}
+              onChange={e => setForm(p => ({ ...p, group: e.target.value }))} />
           </div>
           <div className="grid gap-1.5">
             {isCustom ? (
@@ -747,6 +754,11 @@ export function Sources() {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [tagFilter, setTagFilter] = useState('')
+  const [groupFilter, setGroupFilter] = useState('')
+  const { data: groups = [] } = useQuery({
+    queryKey: ['source-groups'],
+    queryFn:  sourcesApi.groups,
+  })
   const [activeJobs, setActiveJobs] = useState<Record<string, 'active' | 'completed' | 'failed'>>({})
   const [fetchPct, setFetchPct] = useState<Record<string, number>>({})
   const [expandedHealth, setExpandedHealth] = useState<Record<string, boolean>>({})
@@ -811,8 +823,8 @@ export function Sources() {
   }, [qc])
 
   const { data, isLoading } = useQuery({
-    queryKey: ['sources', page, perPage, tagFilter],
-    queryFn: () => sourcesApi.list({ page, per_page: perPage, ...(tagFilter ? { tag: tagFilter } : {}) }),
+    queryKey: ['sources', page, perPage, tagFilter, groupFilter],
+    queryFn: () => sourcesApi.list({ page, per_page: perPage, ...(tagFilter ? { tag: tagFilter } : {}), ...(groupFilter ? { group: groupFilter } : {}) }),
     placeholderData: (prev: any) => prev,
   })
 
@@ -838,6 +850,23 @@ export function Sources() {
     onSuccess: (d) => toast.success(`${d.queued} sources queued for fetch`),
   })
 
+  const bulkGroup = useMutation({
+    mutationFn: ({ action }: { action: 'enable' | 'disable' | 'fetch' }) =>
+      sourcesApi.bulkGroup(groupFilter, action),
+    onSuccess: (d, { action }) => {
+      invalidate()
+      if (action === 'fetch') toast.success(`${d.queued} sources in group queued for fetch`)
+      else toast.success(`${d.updated} sources ${action === 'enable' ? 'enabled' : 'disabled'}`)
+    },
+    onError: () => toast.error('Bulk action failed'),
+  })
+
+  const refetchImages = useMutation({
+    mutationFn: (sourceId?: string) => postsApi.bulkRefetchImages(sourceId),
+    onSuccess: (d) => toast.success(`Re-scraped ${d.processed} posts — ${d.updated} updated, ${d.failed} failed`),
+    onError: () => toast.error('Bulk image refetch failed'),
+  })
+
   const sources    = data?.items ?? []
   const totalPages = data?.pages ?? 1
 
@@ -859,6 +888,10 @@ export function Sources() {
           <Button variant="outline" onClick={() => fetchAll.mutate()} disabled={fetchAll.isPending}>
             {fetchAll.isPending ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             Fetch All
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 text-xs" onClick={() => refetchImages.mutate(undefined)} disabled={refetchImages.isPending}>
+            {refetchImages.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            Re-fetch missing images
           </Button>
           <Button variant="outline" onClick={() => setImportOpen(true)}>
             <Upload />Import URLs
@@ -887,13 +920,57 @@ export function Sources() {
         </div>
       </div>
 
-      {tagFilter && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground">Filtered by tag:</span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
-            {tagFilter}
-            <button onClick={() => setTagFilter('')} className="text-muted-foreground hover:text-foreground">×</button>
-          </span>
+      <div className="flex items-center gap-2">
+        <select value={groupFilter} onChange={e => { setGroupFilter(e.target.value); setPage(1) }}
+          className="h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+          <option value="">All groups</option>
+          {groups.map((g: string) => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <div className="h-6 w-px bg-border" />
+      </div>
+
+      {(tagFilter || groupFilter) && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {tagFilter && (
+            <>
+              <span className="text-xs text-muted-foreground">Filtered by tag:</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
+                {tagFilter}
+                <button onClick={() => setTagFilter('')} className="text-muted-foreground hover:text-foreground">×</button>
+              </span>
+            </>
+          )}
+          {groupFilter && (
+            <>
+              <span className="text-xs text-muted-foreground">Group:</span>
+              <span className="inline-flex items-center gap-1 rounded-full bg-secondary px-2.5 py-0.5 text-xs font-medium">
+                {groupFilter}
+                <button onClick={() => setGroupFilter('')} className="text-muted-foreground hover:text-foreground">×</button>
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
+      {groupFilter && (
+        <div className="flex items-center gap-2 rounded-lg border border-border bg-secondary/40 px-3 py-2">
+          <span className="text-xs text-muted-foreground mr-1">Bulk actions for <strong>{groupFilter}</strong>:</span>
+          <Button size="sm" variant="outline" className="h-7 text-xs"
+            disabled={bulkGroup.isPending}
+            onClick={() => bulkGroup.mutate({ action: 'enable' })}>
+            Enable all
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs"
+            disabled={bulkGroup.isPending}
+            onClick={() => bulkGroup.mutate({ action: 'disable' })}>
+            Disable all
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs"
+            disabled={bulkGroup.isPending}
+            onClick={() => bulkGroup.mutate({ action: 'fetch' })}>
+            {bulkGroup.isPending ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <RefreshCw className="h-3 w-3 mr-1" />}
+            Fetch all
+          </Button>
         </div>
       )}
 
@@ -948,6 +1025,12 @@ export function Sources() {
                         )}
                         {false && (
                           <Badge variant="secondary" className="text-xs">unused</Badge>
+                        )}
+                        {src.group && (
+                          <Badge variant="secondary" className="text-xs cursor-pointer hover:bg-primary/10"
+                            onClick={() => setGroupFilter(src.group)}>
+                            {src.group}
+                          </Badge>
                         )}
                         {src.tags?.map((t: string) => (
                           <Badge key={t} variant="outline" className="text-xs cursor-pointer hover:bg-secondary"

@@ -3,11 +3,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Upload, Trash2, FileText,
   Loader2, ExternalLink, ChevronLeft, ChevronRight,
-  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles,
+  Pencil, Save, X, CheckSquare, Square, Keyboard, Sparkles, Share2, Columns3, Globe,
 } from 'lucide-react'
+import { diffWords } from 'diff'
 import { formatDistanceToNow, format, sub } from 'date-fns'
 import { toast } from 'sonner'
-import { postsApi, sitesApi, sourcesApi } from '@/lib/api'
+import { postsApi, sitesApi, sourcesApi, socialApi } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -20,12 +21,440 @@ import { RichTextEditor } from '@/components/RichTextEditor'
 
 const PER_PAGE = [10, 25, 50, 100] as const
 
+const SOCIAL_TEMPLATES = [
+  { value: 'photo_comment', label: 'Photo + Comment',  needsSite: true  },
+  { value: 'link_post',     label: 'Link Post',        needsSite: true  },
+  { value: 'photo_only',   label: 'Photo Only',        needsSite: false },
+  { value: 'photo_full_text', label: 'Photo + Full text', needsSite: true },
+  { value: 'text_link',    label: 'Text + Link',       needsSite: true  },
+  { value: 'image_overlay',label: 'Image Overlay',     needsSite: false },
+] as const
+
+function SocialPostPreview({ post, template, caption }: { post: any; template: string; caption: string }) {
+  const img = post?.imageUrl
+  const title = post?.aiTitle ?? post?.title ?? ''
+  const domain = post?.originalUrl ? new URL(post.originalUrl).hostname.replace('www.', '') : post?.source?.name ?? 'example.com'
+  const platformName = 'SocialMedia'
+
+  const card = 'rounded-xl border border-border bg-card shadow-sm overflow-hidden max-w-sm w-full'
+  const textXs = 'text-xs text-muted-foreground'
+  if (template === 'photo_comment') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        <div className="relative w-full aspect-[4/3] bg-muted overflow-hidden">
+          {img
+            ? <img src={img} alt="" className="w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            : <div className="w-full h-full flex items-center justify-center text-muted-foreground text-xs">No image</div>
+          }
+          {/* Bottom banner */}
+          <div className="absolute bottom-0 left-0 right-0 h-10 bg-black/90 flex items-center justify-center">
+            <span className="text-white text-[11px] font-bold tracking-widest uppercase">
+              LINKUN NËR KOMENTIN E PARË 👇
+            </span>
+          </div>
+        </div>
+        <div className="px-3 py-2.5 space-y-1.5">
+          <div className="flex gap-3 text-muted-foreground">
+            <span>❤</span><span>💬</span><span>↗</span>
+          </div>
+          <p className={textXs}>View 1 comment</p>
+          {caption && (
+            <div className="border-t border-border pt-1.5">
+              <p className="text-[10px] text-muted-foreground font-semibold mb-0.5">First comment:</p>
+              <p className="text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'link_post') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {caption && <p className="px-3 pb-2 text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>}
+        <div className="border-t border-border">
+          {img ? (
+            <img src={img} alt="" className="w-full aspect-[16/9] object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <div className="w-full aspect-[16/9] bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+          )}
+          <div className="px-3 py-2 space-y-0.5 bg-muted/30">
+            <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{domain}</p>
+            <p className="text-xs font-semibold leading-snug line-clamp-2">{title}</p>
+            <p className={textXs}>Tap to read more</p>
+          </div>
+        </div>
+        <div className="flex gap-3 px-3 py-2 border-t border-border text-muted-foreground">
+          <span>❤</span><span>💬</span><span>↗</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'photo_only') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {img ? (
+          <img src={img} alt="" className="w-full aspect-square object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        ) : (
+          <div className="w-full aspect-square bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+        )}
+        <div className="px-3 py-2.5 space-y-1">
+          <div className="flex gap-3 text-muted-foreground">
+            <span>❤</span><span>💬</span><span>↗</span>
+          </div>
+          {caption && <p className="text-xs whitespace-pre-wrap line-clamp-2">{caption}</p>}
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'photo_full_text') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        {img ? (
+          <img src={img} alt="" className="w-full aspect-square object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+        ) : (
+          <div className="w-full aspect-square bg-muted flex items-center justify-center text-muted-foreground text-xs">No image</div>
+        )}
+        <div className="px-3 py-2.5 space-y-1">
+          <div className="flex gap-3 text-muted-foreground">
+            <span>❤</span><span>💬</span><span>↗</span>
+          </div>
+          {caption && <p className="text-xs whitespace-pre-wrap line-clamp-6">{caption}</p>}
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'text_link') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        <div className="px-3 pb-1 space-y-1">
+          <p className="text-sm font-semibold leading-snug">{title}</p>
+          <p className="text-xs whitespace-pre-wrap line-clamp-3">{caption || 'No caption'}</p>
+        </div>
+        <div className="px-3 pb-3">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 text-primary text-xs font-medium px-3 py-1.5">{domain} ↗</div>
+        </div>
+        <div className="flex gap-3 px-3 py-2 border-t border-border text-muted-foreground">
+          <span>❤</span><span>💬</span><span>↗</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (template === 'image_overlay') {
+    return (
+      <div className={card}>
+        <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border">
+          <div className="h-8 w-8 rounded-full bg-muted-foreground/20 shrink-0 flex items-center justify-center text-xs font-bold text-muted-foreground">{platformName[0]}</div>
+          <div className="min-w-0 flex-1">
+            <p className="text-xs font-semibold leading-tight">{platformName}</p>
+            <p className={textXs}>Just now</p>
+          </div>
+          <div className="text-muted-foreground">···</div>
+        </div>
+        <div className="relative w-full aspect-[4/3]">
+          {img ? (
+            <img src={img} alt="" className="absolute inset-0 w-full h-full object-cover" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+          ) : (
+            <div className="absolute inset-0 bg-muted" />
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="absolute bottom-0 left-0 right-0 p-4 space-y-1">
+            <p className="text-xs font-medium text-white/70 uppercase tracking-wide">{domain}</p>
+            <p className="text-sm font-bold text-white leading-snug line-clamp-3">{title}</p>
+            {caption && <p className="text-xs text-white/80 line-clamp-2">{caption}</p>}
+          </div>
+        </div>
+        <div className="flex gap-3 px-3 py-2 text-muted-foreground">
+          <span>❤</span><span>💬</span><span>↗</span>
+        </div>
+      </div>
+    )
+  }
+
+  return null
+}
+
+function ShareDialog({ post, open, onClose }: { post: any; open: boolean; onClose: () => void }) {
+  const [accountId,         setAccountId]         = useState('')
+  const [template,          setTemplate]          = useState('link_post')
+  const [scheduledAt,       setScheduledAt]       = useState('')
+  const [captionTemplateId, setCaptionTemplateId] = useState('')
+  const [caption,           setCaption]           = useState('')
+  const [captionLoading,    setCaptionLoading]    = useState(false)
+  const [result,            setResult]            = useState<{ ok: boolean; message: string } | null>(null)
+  const [publishing,        setPublishing]        = useState(false)
+
+  const { data: accounts } = useQuery({
+    queryKey: ['social-accounts'],
+    queryFn:  socialApi.accounts,
+  })
+
+  const { data: captionTemplates } = useQuery({
+    queryKey: ['caption-templates'],
+    queryFn:  () => import('@/lib/api').then(m => m.captionTemplatesApi.list()),
+  })
+
+  const selectedAccount = (accounts ?? []).find((a: any) => a.id === accountId)
+  const hasSite = !!selectedAccount?.siteId
+  const availableTemplates = SOCIAL_TEMPLATES.filter(t => !t.needsSite || hasSite)
+  const platformTemplates = (captionTemplates ?? []).filter(
+    (t: any) => selectedAccount && t.platform === selectedAccount.platform
+  )
+
+  const isPublishedToAccountSite = selectedAccount?.siteId
+    ? post?.publishTasks?.some((t: any) => t.site?.id === selectedAccount.siteId)
+    : false
+
+  const destinationUrl = selectedAccount?.siteId
+    ? post?.publishTasks?.find((t: any) => t.site?.id === selectedAccount.siteId)?.wpUrl
+    : null
+
+  // Auto-switch to an image-only template when selected account has no linked site
+  useEffect(() => {
+    if (!accountId) return
+    setCaptionTemplateId('')
+    const valid = availableTemplates.find(t => t.value === template)
+    if (!valid) setTemplate('photo_only')
+  }, [accountId, hasSite]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!accountId || !template || !post?.id) return
+    let cancelled = false
+    const t = setTimeout(async () => {
+      setCaptionLoading(true)
+      try {
+        const res = await socialApi.previewCaption(post.id, accountId, template, captionTemplateId || undefined)
+        if (!cancelled) setCaption(res.caption ?? '')
+      } catch {
+        if (!cancelled) setCaption('')
+      } finally {
+        if (!cancelled) setCaptionLoading(false)
+      }
+    }, 500)
+    return () => { cancelled = true; clearTimeout(t) }
+  }, [accountId, template, captionTemplateId, post?.id])
+
+  async function handlePublish() {
+    if (!accountId) return
+    setPublishing(true)
+    setResult(null)
+    try {
+      await socialApi.publish({
+        postId:           post.id,
+        accountId,
+        template,
+        scheduledAt:      scheduledAt || undefined,
+        captionTemplateId: captionTemplateId || undefined,
+      })
+      setResult({ ok: true, message: scheduledAt ? 'Scheduled successfully' : 'Published successfully' })
+    } catch (e: any) {
+      setResult({ ok: false, message: e.response?.data?.error ?? 'Publish failed' })
+    } finally {
+      setPublishing(false)
+    }
+  }
+
+  const canShare = !!selectedAccount && !!selectedAccount.siteId && isPublishedToAccountSite && !publishing
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader><DialogTitle>Share to Social</DialogTitle></DialogHeader>
+        <div className="space-y-3 px-1 min-w-0">
+          <p className="text-sm text-muted-foreground">Sharing: <strong>{post?.title}</strong></p>
+
+          {/* Destination URL info */}
+          {post?.publishTasks?.length > 0 && (
+            <div className="rounded-md border border-teal-500/30 bg-teal-500/5 px-2.5 py-1.5">
+              <p className="text-xs text-teal-400 font-medium mb-0.5">Published to destination site</p>
+              {post.publishTasks.map((t: any) => (
+                <p key={t.site?.id ?? t.wpUrl} className="text-xs text-muted-foreground truncate">
+                  {t.site?.name}: {t.wpUrl}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-1 min-w-0">
+            <Label className="text-xs">Account</Label>
+            <select
+              value={accountId}
+              onChange={e => setAccountId(e.target.value)}
+              className="h-8 w-full min-w-0 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="">Select account…</option>
+              {(accounts ?? []).filter((a: any) => a.enabled).map((a: any) => (
+                <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Not published warning */}
+          {accountId && selectedAccount?.siteId && !isPublishedToAccountSite && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5">
+              <p className="text-xs text-amber-400 font-medium">
+                Post not published to {selectedAccount.name}'s destination site
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Publish this post to the linked website before sharing to social media.
+              </p>
+            </div>
+          )}
+
+          {/* No site linked warning */}
+          {accountId && selectedAccount && !selectedAccount.siteId && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5">
+              <p className="text-xs text-destructive font-medium">
+                No destination site linked
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                This social account must be linked to a destination site before sharing.
+                Edit the account settings to add a site link.
+              </p>
+            </div>
+          )}
+
+          {/* Destination URL for selected account */}
+          {accountId && destinationUrl && (
+            <div className="grid gap-1 min-w-0">
+              <Label className="text-xs">Destination URL</Label>
+              <p className="text-xs text-muted-foreground truncate bg-secondary/50 rounded px-2 py-1 border border-border">
+                {destinationUrl}
+              </p>
+            </div>
+          )}
+
+          <div className="grid gap-1 min-w-0">
+            <Label className="text-xs">Template</Label>
+            <select
+              value={template}
+              onChange={e => setTemplate(e.target.value)}
+              className="h-8 w-full min-w-0 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              {availableTemplates.map(t => (
+                <option key={t.value} value={t.value}>{t.label}</option>
+              ))}
+            </select>
+            {accountId && !hasSite && (
+              <p className="text-xs text-muted-foreground">
+                Link templates unavailable — no website linked to this account.
+                Only image templates are shown.
+              </p>
+            )}
+          </div>
+
+          {accountId && platformTemplates.length > 0 && (
+            <div className="grid gap-1 min-w-0">
+              <Label className="text-xs">Caption formatting</Label>
+              <select
+                value={captionTemplateId}
+                onChange={e => setCaptionTemplateId(e.target.value)}
+                className="h-8 w-full min-w-0 rounded-md border border-border bg-secondary px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">Default</option>
+                {platformTemplates.map((t: any) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="grid gap-1 min-w-0">
+            <Label className="text-xs">
+              Schedule <span className="text-muted-foreground">(optional)</span>
+            </Label>
+            <input
+              type="datetime-local"
+              value={scheduledAt}
+              onChange={e => setScheduledAt(e.target.value)}
+              className="h-8 w-full rounded-md border border-border bg-background px-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+
+          {accountId && (
+            <div className="grid gap-1.5">
+              <Label className="text-xs flex items-center gap-1.5">
+                Live preview
+                {captionLoading && <Loader2 className="h-3 w-3 animate-spin" />}
+              </Label>
+              <div className="flex justify-center overflow-hidden">
+                <SocialPostPreview post={post} template={template} caption={caption} />
+              </div>
+            </div>
+          )}
+
+          {result && (
+            <p className={`text-sm ${result.ok ? 'text-emerald-400' : 'text-destructive'}`}>
+              {result.message}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={handlePublish} disabled={!canShare}>
+            {publishing && <Loader2 className="animate-spin" />}
+            {scheduledAt ? 'Schedule' : 'Share now'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 const DATE_PRESETS = [
-  { label: 'All time',      days: 0  },
-  { label: 'Today',         days: 1  },
-  { label: 'Last 7 days',   days: 7  },
-  { label: 'Last 30 days',  days: 30 },
-  { label: 'Last 3 months', days: 90 },
+  { label: 'All time',      value: '',     diff: { days: 0 }     },
+  { label: 'Last hour',     value: '1h',   diff: { hours: 1 }    },
+  { label: 'Last 2 hours',  value: '2h',   diff: { hours: 2 }    },
+  { label: 'Last 6 hours',  value: '6h',   diff: { hours: 6 }    },
+  { label: 'Today',         value: '1d',   diff: { days: 1 }     },
+  { label: 'Last 7 days',   value: '7d',   diff: { days: 7 }     },
+  { label: 'Last 30 days',  value: '30d',  diff: { days: 30 }    },
+  { label: 'Last 3 months', value: '90d',  diff: { days: 90 }    },
 ]
 
 const SHORTCUTS = [
@@ -34,9 +463,11 @@ const SHORTCUTS = [
   { key: 'Esc',   desc: 'Cancel / clear' },
 ]
 
-function dateFromPreset(days: number) {
-  if (!days) return ''
-  return sub(new Date(), { days }).toISOString()
+function dateFromPreset(value: string) {
+  if (!value) return ''
+  const preset = DATE_PRESETS.find(p => p.value === value)
+  if (!preset) return ''
+  return sub(new Date(), preset.diff).toISOString()
 }
 
 const WP_STATUS_OPTIONS = [
@@ -58,6 +489,12 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const { data: sites } = useQuery({ queryKey: ['sites'], queryFn: sitesApi.list })
   const qc = useQueryClient()
+
+  const catQuery = useQuery({
+    queryKey: ['site-categories', expandedId],
+    queryFn: () => sitesApi.categories(expandedId!),
+    enabled: !!expandedId,
+  })
 
   const toggle = (siteId: string, checked: boolean) => {
     if (checked) {
@@ -137,8 +574,14 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
                     )}
                     <div>
                       <Label className="text-xs">Category override</Label>
-                      <Input className="mt-1 h-8 text-xs" placeholder="e.g. Technology" value={t.categoryOverride}
-                        onChange={e => update(site.id, 'categoryOverride', e.target.value)} />
+                      <select value={t.categoryOverride}
+                        onChange={e => update(site.id, 'categoryOverride', e.target.value)}
+                        className="mt-1 h-8 w-full rounded border border-border bg-background px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring">
+                        <option value="">None</option>
+                        {(catQuery.data ?? []).map((cat: any) => (
+                          <option key={cat.id} value={cat.name}>{cat.name}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <Label className="text-xs">Tag overrides <span className="text-muted-foreground">(comma-separated)</span></Label>
@@ -160,6 +603,36 @@ function PublishDialog({ post, open, onClose }: { post: any; open: boolean; onCl
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function ContentDiffView({ original, rewritten }: { original: string; rewritten: string }) {
+  const diff = useMemo(() => diffWords(original, rewritten), [original, rewritten])
+  return (
+    <div className="rounded-md border border-border overflow-hidden">
+      <div className="grid grid-cols-2 divide-x divide-border text-xs">
+        <div className="p-3 space-y-1.5">
+          <p className="font-medium text-muted-foreground text-[11px] uppercase tracking-wide mb-2">Original</p>
+          <div className="leading-relaxed text-foreground/80">
+            {diff.filter(p => !p.added).map((p, i) =>
+              p.removed
+                ? <span key={i} className="bg-red-500/20 text-red-400 line-through rounded px-0.5">{p.value}</span>
+                : <span key={i}>{p.value}</span>
+            )}
+          </div>
+        </div>
+        <div className="p-3 space-y-1.5">
+          <p className="font-medium text-muted-foreground text-[11px] uppercase tracking-wide mb-2">AI Enhanced</p>
+          <div className="leading-relaxed text-foreground/80">
+            {diff.filter(p => !p.removed).map((p, i) =>
+              p.added
+                ? <span key={i} className="bg-emerald-500/20 text-emerald-400 rounded px-0.5">{p.value}</span>
+                : <span key={i}>{p.value}</span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -186,12 +659,13 @@ export function Posts() {
   const [perPage,       setPerPage]       = useState(25)
   const [sourceId,      setSourceId]      = useState('')
   const [category,      setCategory]      = useState('')
-  const [dateDays,      setDateDays]      = useState(0)
+  const [datePreset,    setDatePreset]    = useState('')
   const [searchInput,   setSearchInput]   = useState('')
   const [search,        setSearch]        = useState('')
   const [language,      setLanguage]      = useState('')
   const [selected,      setSelected]      = useState<any>(null)
   const [publishTarget, setPublishTarget] = useState<any>(null)
+  const [shareTarget,   setShareTarget]   = useState<any>(null)
   const [checkedIds,    setCheckedIds]    = useState<Set<string>>(new Set())
   const [editMode,      setEditMode]      = useState(false)
   const [draft,         setDraft]         = useState({ title: '', excerpt: '', content: '' })
@@ -200,10 +674,12 @@ export function Posts() {
   const [shortcutHelp,  setShortcutHelp]  = useState(false)
   const [bulkSiteId,    setBulkSiteId]    = useState('')
   const [bulkDialog,    setBulkDialog]    = useState(false)
+  const [diffView,      setDiffView]      = useState(false)
+  const [publishStatus, setPublishStatus] = useState('')
   const qc = useQueryClient()
 
   useEffect(() => { setPage(1); setCategory('') }, [sourceId])
-  useEffect(() => { setPage(1) }, [category, dateDays, perPage, search, language])
+  useEffect(() => { setPage(1) }, [category, datePreset, perPage, search, language, publishStatus])
 
   // Debounce search input
   useEffect(() => {
@@ -213,7 +689,7 @@ export function Posts() {
   useEffect(() => { setCheckedIds(new Set()) }, [page])
   useEffect(() => { setEditMode(false); setLocalCats(null); setCatInput('') }, [selected?.id])
 
-  const dateFrom = useMemo(() => dateFromPreset(dateDays), [dateDays])
+  const dateFrom = useMemo(() => dateFromPreset(datePreset), [datePreset])
 
   const { data: languagesData } = useQuery({
     queryKey: ['post-languages'],
@@ -222,7 +698,7 @@ export function Posts() {
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['posts', page, perPage, sourceId, category, dateDays, search, language],
+    queryKey: ['posts', page, perPage, sourceId, category, datePreset, search, language, publishStatus],
     queryFn: () => postsApi.list({
       page,
       per_page: perPage,
@@ -231,6 +707,7 @@ export function Posts() {
       ...(dateFrom && { dateFrom }),
       ...(search   && { search }),
       ...(language && { language }),
+      ...(publishStatus && { publishStatus }),
     }),
     placeholderData: (prev: any) => prev,
     refetchInterval: 15_000,
@@ -382,19 +859,39 @@ export function Posts() {
               <option value="">{sourceId ? 'All categories' : 'Pick source first'}</option>
               {(categories ?? []).map((c: string) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <select value={dateDays} onChange={e => setDateDays(Number(e.target.value))}
+            <select value={datePreset} onChange={e => setDatePreset(e.target.value)}
               className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
-              {DATE_PRESETS.map(p => <option key={p.days} value={p.days}>{p.label}</option>)}
+              {DATE_PRESETS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
             {languagesData?.length > 0 && (
               <select value={language} onChange={e => { setLanguage(e.target.value); setPage(1) }}
                 className="flex-1 min-w-0 h-8 rounded-md border border-border bg-secondary px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring truncate">
                 <option value="">All langs</option>
-                {languagesData.map((l: { code: string; count: number }) => (
-                  <option key={l.code} value={l.code}>{l.code} ({l.count})</option>
-                ))}
+                {languagesData
+                  .filter((l: { code: string }) => ['sq', 'en', 'it', 'es'].includes(l.code))
+                  .map((l: { code: string; count: number }) => (
+                    <option key={l.code} value={l.code}>{l.code} ({l.count})</option>
+                  ))}
               </select>
             )}
+          </div>
+          {/* Publish status filter tabs */}
+          <div className="flex gap-1">
+            {[
+              { value: '',      label: 'All' },
+              { value: 'DRAFT', label: 'Draft' },
+              { value: 'SCHEDULED', label: 'Scheduled' },
+              { value: 'PUBLISHED', label: 'Published' },
+            ].map(opt => (
+              <button key={opt.value} onClick={() => { setPublishStatus(opt.value); setPage(1) }}
+                className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                  publishStatus === opt.value
+                    ? 'border-primary bg-primary/10 text-primary font-medium'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -463,8 +960,33 @@ export function Posts() {
                           {post.source?.name}
                           {post.categories?.length > 0 && <> · {post.categories.slice(0, 2).join(', ')}</>}
                           {' · '}{formatDistanceToNow(new Date(post.createdAt), { addSuffix: true })}
+                          {post.sourcePublishedAt && (
+                            <> · orig {format(new Date(post.sourcePublishedAt), 'dd MMM yyyy, HH:mm')}</>
+                          )}
                         </p>
-                        {post.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs mt-0.5">Published</Badge>}
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {post.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
+                          {post._count?.socialPosts > 0 && (
+                            <Badge variant="outline" className="text-xs text-blue-400 border-blue-500/30 gap-1">
+                              <Share2 className="h-2.5 w-2.5" />
+                              {post._count.socialPosts > 1 ? `${post._count.socialPosts}×` : 'Shared'}
+                            </Badge>
+                          )}
+                          {post._count?.publishTasks > 0 && (
+                            <Badge variant="outline" className="text-xs text-teal-400 border-teal-500/30 gap-1">
+                              <Globe className="h-2.5 w-2.5" />
+                              {post._count.publishTasks > 1 ? `${post._count.publishTasks} sites` : '1 site'}
+                            </Badge>
+                          )}
+                        </div>
+                        {post.publishTasks?.length > 0 && (
+                          <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                            <Globe className="inline h-3 w-3 mr-0.5" />
+                            {post.publishTasks.map((t: any) => t.site?.name).filter(Boolean).join(', ')}
+                            {' — '}
+                            {post.publishTasks[0].wpUrl}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -528,8 +1050,17 @@ export function Posts() {
                   onClick={() => { setDraft({ title: selected.title ?? '', excerpt: selected.excerpt ?? '', content: selected.content ?? '' }); setEditMode(true) }}>
                   <Pencil className="h-3.5 w-3.5" />
                 </Button>
+                {selected.aiTitle && selected.aiTitle !== selected.title && (
+                  <Button size="icon" variant={diffView ? 'default' : 'ghost'} className="h-7 w-7 shrink-0"
+                    onClick={() => setDiffView(v => !v)} title="Toggle diff view">
+                    <Columns3 className="h-3.5 w-3.5" />
+                  </Button>
+                )}
                 <Button size="sm" className="h-7 text-xs" onClick={() => setPublishTarget(selected)}>
                   <Upload className="h-3 w-3 mr-1" />Publish
+                </Button>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setShareTarget(selected)}>
+                  <Share2 className="h-3 w-3 mr-1" />Share
                 </Button>
                 <Button size="icon" variant="ghost" className="h-7 w-7 text-muted-foreground hover:text-destructive ml-auto"
                   onClick={() => remove.mutate(selected.id)} disabled={remove.isPending}>
@@ -543,20 +1074,42 @@ export function Posts() {
           <div className="flex-1 overflow-y-auto px-5 py-4 pb-10">
             {!editMode && (
               <div className="space-y-3 mb-4">
-                {/* Featured image — full width, natural aspect ratio */}
-                {selected.imageUrl && (
-                  <img src={selected.imageUrl} alt=""
-                    className="w-full rounded-lg object-cover"
-                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                )}
+                {diffView && selected.aiTitle ? (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Title diff</p>
+                      <ContentDiffView original={selected.title ?? ''} rewritten={selected.aiTitle} />
+                    </div>
+                    {selected.aiSummary && (
+                      <div>
+                        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Summary diff</p>
+                        <ContentDiffView original={selected.excerpt || selected.content?.slice(0, 500) || ''} rewritten={selected.aiSummary} />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <>
+                    {/* Featured image — container ensures consistent sizing */}
+                    {selected.imageUrl && (
+                      <div className="relative w-full aspect-video rounded-lg overflow-hidden bg-muted">
+                        <img src={selected.imageUrl} alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          onError={(e) => {
+                            const el = e.target as HTMLImageElement
+                            el.parentElement?.classList.add('hidden')
+                          }} />
+                      </div>
+                    )}
 
-                {/* Title */}
-                <h1 className="text-base font-semibold leading-snug mt-2">
-                  {selected.aiTitle ?? selected.title}
-                  {selected.aiTitle && <Sparkles className="inline h-3.5 w-3.5 ml-1.5 text-violet-400" />}
-                </h1>
-                {selected.aiTitle && selected.aiTitle !== selected.title && (
-                  <p className="text-xs text-muted-foreground opacity-60 -mt-2">Original: {selected.title}</p>
+                    {/* Title */}
+                    <h1 className="text-base font-semibold leading-snug mt-2">
+                      {selected.aiTitle ?? selected.title}
+                      {selected.aiTitle && <Sparkles className="inline h-3.5 w-3.5 ml-1.5 text-violet-400" />}
+                    </h1>
+                    {selected.aiTitle && selected.aiTitle !== selected.title && (
+                      <p className="text-xs text-muted-foreground opacity-60 -mt-2">Original: {selected.title}</p>
+                    )}
+                  </>
                 )}
 
                 {/* Byline */}
@@ -565,6 +1118,9 @@ export function Posts() {
                   {selected.author && <><span>·</span><span>{selected.author}</span></>}
                   <span>·</span>
                   <span>{format(new Date(selected.createdAt), 'dd MMM yyyy, HH:mm')}</span>
+                  {selected.sourcePublishedAt && (
+                    <><span>·</span><span className="text-amber-500/80">orig {format(new Date(selected.sourcePublishedAt), 'dd MMM yyyy, HH:mm')}</span></>
+                  )}
                   {selected.originalUrl && (() => {
                     try {
                       const domain = new URL(selected.originalUrl).hostname.replace(/^www\./, '')
@@ -579,6 +1135,20 @@ export function Posts() {
                       )
                     } catch { return null }
                   })()}
+                  {selected.publishTasks?.map((t: any) => {
+                    try {
+                      const domain = new URL(t.wpUrl).hostname.replace(/^www\./, '')
+                      return (
+                        <span key={t.wpUrl}>
+                          <span>·</span>
+                          <a href={t.wpUrl} target="_blank" rel="noopener noreferrer"
+                            className="inline-flex items-center gap-0.5 text-teal-400 hover:underline">
+                            {t.site?.name ?? domain} <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        </span>
+                      )
+                    } catch { return null }
+                  })}
                 </div>
 
                 {/* Editable categories */}
@@ -611,6 +1181,18 @@ export function Posts() {
                     className="h-5 w-24 text-xs bg-transparent border-b border-border/60 focus:outline-none focus:border-primary placeholder:text-muted-foreground/50"
                   />
                   {selected.publishStatus === 'PUBLISHED' && <Badge variant="success" className="text-xs">Published</Badge>}
+                  {selected._count?.socialPosts > 0 && (
+                    <Badge variant="outline" className="text-xs text-blue-400 border-blue-500/30 gap-1">
+                      <Share2 className="h-3 w-3" />
+                      {selected._count.socialPosts > 1 ? `Shared ${selected._count.socialPosts}×` : 'Shared socially'}
+                    </Badge>
+                  )}
+                  {selected._count?.publishTasks > 0 && (
+                    <Badge variant="outline" className="text-xs text-teal-400 border-teal-500/30 gap-1">
+                      <Globe className="h-3 w-3" />
+                      {selected._count.publishTasks > 1 ? `${selected._count.publishTasks} sites` : '1 site'}
+                    </Badge>
+                  )}
                   {selected.language && selected.language !== 'en' && (
                     <Badge variant="outline" className="text-xs font-mono">{selected.language}</Badge>
                   )}
@@ -709,6 +1291,9 @@ export function Posts() {
 
       {publishTarget && (
         <PublishDialog post={publishTarget} open={!!publishTarget} onClose={() => setPublishTarget(null)} />
+      )}
+      {shareTarget && (
+        <ShareDialog post={shareTarget} open={!!shareTarget} onClose={() => setShareTarget(null)} />
       )}
       <ShortcutHelp open={shortcutHelp} onClose={() => setShortcutHelp(false)} />
     </div>

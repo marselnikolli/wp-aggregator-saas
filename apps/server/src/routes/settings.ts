@@ -29,12 +29,13 @@ export async function getSettingValue(key: string): Promise<string | null> {
 
 export async function settingsRoutes(app: FastifyInstance) {
   app.get('/settings', { onRequest: [app.authenticate] }, async () => {
-    const [openai, anthropic, interval, threshold, translateTo] = await Promise.all([
+    const [openai, anthropic, interval, threshold, translateTo, categoryColors] = await Promise.all([
       db.setting.findUnique({ where: { key: 'openai_key' } }),
       db.setting.findUnique({ where: { key: 'anthropic_key' } }),
       db.setting.findUnique({ where: { key: 'fetch_interval' } }),
       db.setting.findUnique({ where: { key: 'quality_threshold' } }),
       db.setting.findUnique({ where: { key: 'translate_to' } }),
+      db.setting.findUnique({ where: { key: 'category_colors' } }),
     ])
     return {
       openaiKeySet:     !!openai,
@@ -42,6 +43,7 @@ export async function settingsRoutes(app: FastifyInstance) {
       fetchInterval:    interval  ? Number(interval.value)  : 60,
       qualityThreshold: threshold ? Number(threshold.value) : 0,
       translateTo:      translateTo?.value ?? '',
+      category_colors:  categoryColors?.value ?? null,
     }
   })
 
@@ -137,6 +139,76 @@ export async function settingsRoutes(app: FastifyInstance) {
       await db.setting.deleteMany({ where: { key: 'webhook_url' } })
     }
     reply.code(204).send()
+  })
+
+  // Broken source alerting threshold
+  app.get('/settings/broken-source-threshold', { onRequest: [app.authenticate] }, async () => {
+    const row = await db.setting.findUnique({ where: { key: 'broken_source_threshold' } })
+    return { threshold: row ? Number(row.value) : 3 }
+  })
+
+  app.post('/settings/broken-source-threshold', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const { threshold } = z.object({ threshold: z.number().int().min(1).max(100) }).parse(req.body)
+    await setSetting('broken_source_threshold', String(threshold))
+    reply.code(204).send()
+  })
+
+  // SMTP / email settings
+  app.get('/settings/smtp', { onRequest: [app.authenticate] }, async () => {
+    const [host, port, user, pass, fromAddr] = await Promise.all([
+      db.setting.findUnique({ where: { key: 'smtp_host' } }),
+      db.setting.findUnique({ where: { key: 'smtp_port' } }),
+      db.setting.findUnique({ where: { key: 'smtp_user' } }),
+      db.setting.findUnique({ where: { key: 'smtp_pass' } }),
+      db.setting.findUnique({ where: { key: 'smtp_from' } }),
+    ])
+    return {
+      host: host?.value ?? '',
+      port: port ? Number(port.value) : 587,
+      userSet: !!user,
+      from: fromAddr?.value ?? '',
+    }
+  })
+
+  app.post('/settings/smtp', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const body = z.object({
+      host: z.string().optional(),
+      port: z.number().int().min(1).max(65535).optional(),
+      user: z.string().optional(),
+      pass: z.string().optional(),
+      from: z.string().email().optional(),
+    }).parse(req.body)
+    const ops = []
+    if (body.host !== undefined) ops.push(setSetting('smtp_host', body.host))
+    if (body.port !== undefined) ops.push(setSetting('smtp_port', String(body.port)))
+    if (body.user !== undefined) ops.push(setSetting('smtp_user', body.user))
+    if (body.pass !== undefined) ops.push(setSetting('smtp_pass', body.pass))
+    if (body.from !== undefined) ops.push(setSetting('smtp_from', body.from))
+    await Promise.all(ops)
+    reply.code(204).send()
+  })
+
+  app.post('/settings/smtp/test', { onRequest: [app.authenticate] }, async (req) => {
+    const body = z.object({
+      host: z.string().min(1),
+      port: z.number().int().min(1).max(65535),
+      user: z.string().optional(),
+      pass: z.string().optional(),
+      from: z.string().email().min(1),
+      to:   z.string().email().min(1),
+    }).parse(req.body)
+    try {
+      const { sendEmail } = await import('../lib/email.js')
+      await sendEmail({
+        to: body.to,
+        subject: 'WP Aggregator — SMTP Test',
+        text: 'This is a test email from WP Aggregator. Your SMTP settings are working.',
+        smtp: { host: body.host, port: body.port, user: body.user ?? '', pass: body.pass ?? '', from: body.from },
+      })
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, error: (err as Error).message }
+    }
   })
 
   app.get('/settings/webhook-log', { onRequest: [app.authenticate] }, async () => {
@@ -341,6 +413,12 @@ export async function settingsRoutes(app: FastifyInstance) {
   })
   app.delete('/settings/feed-token', { onRequest: [app.authenticate] }, async (_req, reply) => {
     await db.setting.deleteMany({ where: { key: 'feed_token' } })
+    reply.code(204).send()
+  })
+
+  app.post('/settings', { onRequest: [app.authenticate] }, async (req, reply) => {
+    const body = z.record(z.string(), z.string()).parse(req.body)
+    await Promise.all(Object.entries(body).map(([key, value]) => setSetting(key, value)))
     reply.code(204).send()
   })
 

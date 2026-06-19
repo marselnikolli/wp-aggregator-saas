@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '../db.js'
 import { publishQueue } from '../queue.js'
 import { audit } from '../lib/audit.js'
+import { tryOgImageFallback } from '../workers/fetcher.js'
 
 export async function postsRoutes(app: FastifyInstance) {
   app.get('/posts', { preHandler: [app.authenticate] }, async (req) => {
@@ -33,7 +34,22 @@ export async function postsRoutes(app: FastifyInstance) {
         skip: (query.page - 1) * query.per_page,
         take: query.per_page,
         orderBy: { createdAt: 'desc' },
-        include: { source: { select: { name: true } } },
+        include: {
+          source: { select: { name: true } },
+          publishTasks: {
+            where: { status: 'DONE' },
+            select: {
+              wpUrl: true,
+              site:  { select: { id: true, name: true, url: true } },
+            },
+          },
+          _count: {
+            select: {
+              socialPosts:  { where: { status: 'DONE' } },
+              publishTasks: { where: { status: 'DONE' } },
+            },
+          },
+        },
       }),
     ])
     return { total, pages: Math.ceil(total / query.per_page), page: query.page, items }
@@ -196,6 +212,37 @@ export async function postsRoutes(app: FastifyInstance) {
       }),
     ])
     return { total, pages: Math.ceil(total / query.per_page), page: query.page, items }
+  })
+
+  // Bulk re-fetch missing featured images via og:image scrape
+  app.post('/posts/bulk-refetch-images', { preHandler: [app.authenticate] }, async (req) => {
+    const body = z.object({
+      sourceId: z.string().optional(),
+    }).parse(req.body)
+
+    const posts = await db.aggregatedPost.findMany({
+      where: {
+        imageUrl: null,
+        ...(body.sourceId ? { sourceId: body.sourceId } : {}),
+        originalUrl: { not: null },
+      },
+      take: 100,
+      select: { id: true, originalUrl: true },
+    })
+
+    let updated = 0
+    let failed = 0
+    for (const post of posts) {
+      try {
+        const result = await tryOgImageFallback(post.id, post.originalUrl!)
+        if (result) updated++
+        else failed++
+      } catch {
+        failed++
+      }
+    }
+
+    return { processed: posts.length, updated, failed }
   })
 
   // Retry a failed publish task

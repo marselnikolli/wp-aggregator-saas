@@ -7,6 +7,7 @@ import { fetchQueue, fetchQueueEvents } from '../queue.js'
 import { encrypt } from '../lib/crypto.js'
 import { unwrapResponse, CAT_NAME_KEYS, FIELD_GUESS_MAP, tryParseBody } from '../lib/customApi.js'
 import { audit } from '../lib/audit.js'
+import { tryOgImageFallback, tryUnsplashFallback } from '../workers/fetcher.js'
 
 const INTERVAL_MS: Record<string, number> = {
   '15m': 900_000,
@@ -37,6 +38,7 @@ const sourceBody = z.object({
   endpoint: z.string().min(1),
   type:     z.enum(['RSS', 'WP_API', 'CUSTOM_API']).default('RSS'),
   enabled:  z.boolean().optional().default(true),
+  group:    z.string().optional(),
 })
 
 const sourceUpdateBody = z.object({
@@ -45,7 +47,7 @@ const sourceUpdateBody = z.object({
   type:              z.enum(['RSS', 'WP_API', 'CUSTOM_API']).optional(),
   enabled:           z.boolean().optional(),
   interval:          z.enum(['15m', '1h', '6h', '24h']).nullable().optional(),
-  username:          z.string().optional(),
+  username:          z.string().nullable().optional(),
   password:          z.string().optional(),
   tags:              z.array(z.string()).optional(),
   minDelaySec:       z.number().int().min(0).max(60).optional(),
@@ -55,6 +57,7 @@ const sourceUpdateBody = z.object({
   userAgent:         z.string().nullable().optional(),
   proxyUrl:          z.string().nullable().optional(),
   categoryMap:       z.record(z.record(z.string())).nullable().optional(),
+  group:             z.string().nullable().optional(),
 })
 
 export async function sourcesRoutes(app: FastifyInstance) {
@@ -63,9 +66,12 @@ export async function sourcesRoutes(app: FastifyInstance) {
       page:     z.coerce.number().min(1).default(1),
       per_page: z.coerce.number().min(1).max(100).default(20),
       tag:      z.string().optional(),
+      group:    z.string().optional(),
     }).parse(req.query)
 
-    const where = query.tag ? { tags: { has: query.tag } } : undefined
+    const where: Record<string, unknown> = {}
+    if (query.tag)   where.tags  = { has: query.tag }
+    if (query.group) where.group = query.group
 
     const [total, items] = await Promise.all([
       db.source.count({ where }),
@@ -80,6 +86,13 @@ export async function sourcesRoutes(app: FastifyInstance) {
     // Never send password to client
     const safeItems = items.map(({ password: _pw, ...s }) => s)
     return { total, pages: Math.ceil(total / query.per_page), page: query.page, items: safeItems }
+  })
+
+  app.get('/sources/groups', { preHandler: [app.authenticate] }, async () => {
+    const rows = await db.$queryRaw<Array<{ group: string }>>`
+      SELECT DISTINCT "group" FROM "Source" WHERE "group" IS NOT NULL AND "group" != '' ORDER BY "group" ASC
+    `
+    return rows.map(r => r.group)
   })
 
   app.post('/sources', { preHandler: [app.authenticate] }, async (req, reply) => {
@@ -243,6 +256,26 @@ export async function sourcesRoutes(app: FastifyInstance) {
     return { queued: jobs.length }
   })
 
+  app.post('/sources/bulk-group', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const { group, action } = z.object({
+      group:  z.string().min(1),
+      action: z.enum(['enable', 'disable', 'fetch']),
+    }).parse(req.body)
+
+    const sources = await db.source.findMany({ where: { group }, select: { id: true } })
+    if (!sources.length) return reply.code(404).send({ error: 'No sources in group' })
+
+    if (action === 'enable' || action === 'disable') {
+      await db.source.updateMany({ where: { group }, data: { enabled: action === 'enable' } })
+      return { updated: sources.length }
+    }
+
+    const jobs = await Promise.all(
+      sources.map(s => fetchQueue.add('fetch-source', { sourceId: s.id }))
+    )
+    return { queued: jobs.length }
+  })
+
   app.get('/sources/events', { preHandler: [app.authenticate] }, async (req, reply) => {
     const res = reply.raw
     res.writeHead(200, {
@@ -257,21 +290,27 @@ export async function sourcesRoutes(app: FastifyInstance) {
       if (!res.writableEnded) res.write(`data: ${JSON.stringify(data)}\n\n`)
     }
 
+    async function withSourceName(sourceId: string, extra: Record<string, unknown> = {}) {
+      let sourceName = sourceId
+      try { const s = await db.source.findUnique({ where: { id: sourceId }, select: { name: true } }); if (s) sourceName = s.name } catch {}
+      return { ...extra, sourceId, sourceName }
+    }
+
     async function onActive({ jobId }: { jobId: string }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:active', sourceId: job.data.sourceId, jobId })
+      if (job?.data?.sourceId) send({ type: 'job:active', ...(await withSourceName(job.data.sourceId)), jobId })
     }
     async function onCompleted({ jobId }: { jobId: string }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:completed', sourceId: job.data.sourceId })
+      if (job?.data?.sourceId) send({ type: 'job:completed', ...(await withSourceName(job.data.sourceId)) })
     }
     async function onFailed({ jobId, failedReason }: { jobId: string; failedReason: string }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:failed', sourceId: job.data.sourceId, error: failedReason })
+      if (job?.data?.sourceId) send({ type: 'job:failed', ...(await withSourceName(job.data.sourceId)), error: failedReason })
     }
     async function onProgress({ jobId, data }: { jobId: string; data: unknown }) {
       const job = await fetchQueue.getJob(jobId)
-      if (job?.data?.sourceId) send({ type: 'job:progress', sourceId: job.data.sourceId, progress: data })
+      if (job?.data?.sourceId) send({ type: 'job:progress', ...(await withSourceName(job.data.sourceId)), progress: data })
     }
 
     fetchQueueEvents.on('active',    onActive)

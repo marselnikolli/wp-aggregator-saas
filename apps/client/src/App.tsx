@@ -10,8 +10,15 @@ import { Posts }     from '@/pages/Posts'
 import { Settings }  from '@/pages/Settings'
 import { AuditLog }  from '@/pages/AuditLog'
 import { Team }      from '@/pages/Team'
+import { Account }   from '@/pages/Account'
 import { Pipelines }      from '@/pages/Pipelines'
+import { PipelineEditor } from '@/pages/PipelineEditor'
 import { PublishHistory } from '@/pages/PublishHistory'
+import { Dedup } from '@/pages/Dedup'
+import { SocialAccounts }  from '@/pages/social/SocialAccounts'
+import { SocialQueue }     from '@/pages/social/SocialQueue'
+import { SocialAnalytics } from '@/pages/social/SocialAnalytics'
+import { SocialTemplates } from '@/pages/social/SocialTemplates'
 import { Login }     from '@/pages/Login'
 import { Skeleton }  from '@/components/ui/skeleton'
 
@@ -50,8 +57,17 @@ function AppRoutes() {
         <Route path="settings"  element={<Settings />} />
         <Route path="audit-log" element={<AuditLog />} />
         <Route path="team"       element={<Team />} />
-        <Route path="pipelines"     element={<Pipelines />} />
+        <Route path="account"   element={<Account />} />
+        <Route path="pipelines"          element={<Pipelines />} />
+        <Route path="pipelines/new"      element={<PipelineEditor />} />
+        <Route path="pipelines/:id/edit" element={<PipelineEditor />} />
         <Route path="history"       element={<PublishHistory />} />
+        <Route path="dedup"        element={<Dedup />} />
+        <Route path="social/accounts"   element={<SocialAccounts />} />
+        <Route path="social/queue"      element={<SocialQueue />} />
+        <Route path="social/analytics"  element={<SocialAnalytics />} />
+        <Route path="social/templates"  element={<SocialTemplates />} />
+        <Route path="social" element={<Navigate to="/social/accounts" replace />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

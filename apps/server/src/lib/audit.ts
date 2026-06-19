@@ -15,8 +15,10 @@ export type AuditAction =
   | 'site.delete'
   | 'settings.update'
   | 'auth.login'
+  | 'auth.me.update'
   | 'auth.totp.enable'
   | 'auth.totp.disable'
+  | 'dedup.mark-unique'
 
 export interface AuditContext {
   userId?:       string

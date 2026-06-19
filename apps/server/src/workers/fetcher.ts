@@ -140,12 +140,30 @@ function cleanContent(html: string): string {
     })
   }
 
+  // Pass 9 — strip leading metadata (author bylines, datelines, site branding)
+  const META_PATTERNS = [
+    /^(autor|author|shkruan|nga|by|burimi|source|kategoria|category|dat[ëe]|date|published|updated|përditësuar|kontakt|email|website|site)\s*[:]/i,
+    /^(foto|photo|image|pictures?)\s*(:|nga|by|from)\s/i,
+    /^©\s*.+/i,
+    /^[A-Z][a-z]+ [A-Z][a-z]+(\s+[|–—-]\s+\d+[./]\d+)/,
+  ]
+  const TEXT_ELS = 'p, div, li, h1, h2, h3, h4, h5, h6'
+  for (let i = 0; i < 3; i++) {
+    const el = $(TEXT_ELS).first()
+    if (!el.length) break
+    const text = el.text().trim()
+    if (!text) { el.remove(); continue }
+    if (text.length > 120) break
+    if (META_PATTERNS.some(r => r.test(text))) { el.remove(); continue }
+    break
+  }
+
   let out = $('body').html() ?? ''
 
-  // Pass 9 — collapse 3+ consecutive <br> down to 2
+  // Pass 10 — collapse 3+ consecutive <br> down to 2
   out = out.replace(/(\s*<br\s*\/?>\s*){3,}/gi, '<br><br>')
 
-  // Pass 10 — strip WP block comments and shortcodes
+  // Pass 11 — strip WP block comments and shortcodes
   out = out.replace(/<!--\s*\/?wp:[^>]*-->/gi, '')
   out = out.replace(/\[[a-z_-]+[^\]]*\]/gi, '')          // [gallery], [caption id=...], etc.
   out = out.replace(/&nbsp;(\s*&nbsp;)+/g, ' ')           // repeated &nbsp; runs
@@ -157,6 +175,14 @@ export interface FetchJobData { sourceId: string }
 
 function basicAuthHeader(username: string, password: string): string {
   return 'Basic ' + Buffer.from(`${username}:${password}`).toString('base64')
+}
+
+function parseDate(raw: string | null): Date | null {
+  if (!raw) return null
+  try {
+    const d = new Date(raw)
+    return isNaN(d.getTime()) ? null : d
+  } catch { return null }
 }
 
 async function fetchRss(endpoint: string, auth?: { username: string; password: string }) {
@@ -217,6 +243,7 @@ function mapRssItem(item: any) {
     originalUrl: item.link ?? null,
     author:      item.creator ?? null,
     categories:  item.categories ?? [],
+    sourcePublishedAt: item.isoDate ? new Date(item.isoDate) : item.pubDate ? new Date(item.pubDate) : null,
   }
 }
 
@@ -259,6 +286,7 @@ async function fetchWpApi(endpoint: string, auth?: { username: string; password:
       originalUrl: p.link ?? null,
       author:      (embedded['author']?.[0]?.name as string | undefined) ?? null,
       categories,
+      sourcePublishedAt: p.date ? new Date(p.date) : p.date_gmt ? new Date(p.date_gmt) : null,
     }
   })
 }
@@ -269,20 +297,33 @@ const CF_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHT
 
 const SCRAPLING_PROXY = `http://127.0.0.1:${process.env.SCRAPLING_PROXY_PORT ?? '3002'}`
 
-async function fetchViaScrapling(url: string): Promise<string> {
+async function scraplingAction<T = any>(action: string, url: string): Promise<T | null> {
   try {
     const res = await fetch(SCRAPLING_PROXY, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ action, url }),
       signal: AbortSignal.timeout(60000),
     })
-    if (!res.ok) return ''
-    const data = await res.json() as { success: boolean; html: string }
-    return data.success ? data.html : ''
+    if (!res.ok) return null
+    const data = await res.json() as T & { success: boolean }
+    return data.success ? data : null
   } catch {
-    return ''
+    return null
   }
+}
+
+async function fetchViaScrapling(url: string): Promise<string> {
+  const data = await scraplingAction<{ html: string }>('fetch', url)
+  return data?.html ?? ''
+}
+
+async function parseListingViaScrapling(url: string): Promise<{ items: any[]; html?: string } | null> {
+  return scraplingAction<{ items: any[] }>('parse_listing', url)
+}
+
+async function parseArticleViaScrapling(url: string): Promise<{ content: string; excerpt: string; imageUrl: string | null } | null> {
+  return scraplingAction<{ content: string; excerpt: string; imageUrl: string | null }>('parse_article', url)
 }
 
 async function fetchWithFallback(url: string, headers: Record<string, string>, dispatcher?: any): Promise<{ text: string; ok: boolean }> {
@@ -399,11 +440,20 @@ async function fetchCustomApi(source: {
 
       let items: unknown[] = []
       let isHtml = false
-      const fetched = await fetchWithFallback(url, headers, dispatcher)
-      if (!fetched.ok || !fetched.text) break
-      const parsed = tryParseBody(fetched.text)
-      items = parsed.items
-      isHtml = parsed.isHtml
+
+      // Try Python Scrapling for adaptive listing parsing first
+      const scraplingResult = await parseListingViaScrapling(url)
+      if (scraplingResult?.items?.length) {
+        items = scraplingResult.items
+        isHtml = true
+      } else {
+        // Fall back to Node-based fetch + cheerio parsing
+        const fetched = await fetchWithFallback(url, headers, dispatcher)
+        if (!fetched.ok || !fetched.text) break
+        const parsed = tryParseBody(fetched.text)
+        items = parsed.items
+        isHtml = parsed.isHtml
+      }
 
       if (!items.length) break
 
@@ -430,11 +480,19 @@ async function fetchCustomApi(source: {
 
         if (isHtml && !content && typeof resolved.url === 'string' && resolved.url) {
           if (source.minDelaySec > 0) await sleep(source.minDelaySec * 1000)
-          const scraped = await fetchArticleContent(resolved.url, dispatcher, ua)
-          content = scraped.content
-          if (!excerpt) excerpt = scraped.excerpt
-          // Use scraped image if the listing didn't provide one
-          if (!imageUrl && scraped.imageUrl) imageUrl = scraped.imageUrl
+          // Try Python Scrapling for article content first
+          const scrapedArticle = await parseArticleViaScrapling(resolved.url)
+          if (scrapedArticle?.content) {
+            content = scrapedArticle.content
+            if (!excerpt) excerpt = scrapedArticle.excerpt
+            if (!imageUrl && scrapedArticle.imageUrl) imageUrl = scrapedArticle.imageUrl
+          } else {
+            // Fall back to Node-based article scraping
+            const scraped = await fetchArticleContent(resolved.url, dispatcher, ua)
+            content = scraped.content
+            if (!excerpt) excerpt = scraped.excerpt
+            if (!imageUrl && scraped.imageUrl) imageUrl = scraped.imageUrl
+          }
         }
 
         results.push({
@@ -446,6 +504,7 @@ async function fetchCustomApi(source: {
           originalUrl: (get('originalUrl', 'url') as string | null) ?? null,
           author:      (get('author', 'author') as string | null) ?? null,
           categories:  [name],
+          sourcePublishedAt: parseDate(get('sourcePublishedAt', 'date') as string | null),
         })
         catCount++
       }
@@ -520,7 +579,7 @@ async function setCachedItems(sourceId: string, interval: string | null, items: 
   } catch { /* non-fatal */ }
 }
 
-async function tryOgImageFallback(postId: string, articleUrl: string): Promise<boolean> {
+export async function tryOgImageFallback(postId: string, articleUrl: string): Promise<boolean> {
   try {
     const res = await fetch(articleUrl, {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; WPAggregator/1.0)' },
@@ -532,7 +591,11 @@ async function tryOgImageFallback(postId: string, articleUrl: string): Promise<b
     const ogImage =
       $('meta[property="og:image"]').attr('content') ??
       $('meta[name="twitter:image"]').attr('content') ??
-      $('meta[property="og:image:url"]').attr('content')
+      $('meta[property="og:image:url"]').attr('content') ??
+      // Fallback to first <img> in article body when og:image is missing
+      ($('article img, .post-content img, .entry-content img, .article-content img').first().attr('src') ??
+       $('main img').first().attr('src') ??
+       $('img').first().attr('src'))
     if (!ogImage) return false
     const resolved = ogImage.startsWith('http') ? ogImage : new URL(ogImage, articleUrl).href
     const slug = slugify(articleUrl.split('/').pop() ?? postId) || postId
@@ -542,7 +605,7 @@ async function tryOgImageFallback(postId: string, articleUrl: string): Promise<b
   } catch { return false }
 }
 
-async function tryUnsplashFallback(postId: string, title: string): Promise<void> {
+export async function tryUnsplashFallback(postId: string, title: string): Promise<void> {
   const key = await getSettingValue('unsplash_api_key')
   if (!key) return
   const query = encodeURIComponent(title.replace(/<[^>]+>/g, '').slice(0, 80))
@@ -609,6 +672,7 @@ async function processSource(sourceId: string, job?: Job<FetchJobData>): Promise
         sourceId: source.id, remoteId: item.remoteId, title: item.title,
         content: item.content, excerpt: item.excerpt, imageUrl: item.imageUrl,
         originalUrl: item.originalUrl, author: item.author, categories: item.categories, hash,
+        sourcePublishedAt: (item as any).sourcePublishedAt ?? null,
       },
     })
     // Language detection (sync, best-effort)
@@ -689,10 +753,32 @@ export function startFetchWorker() {
           where: { id: jobRecord.id },
           data: { status: 'ERROR', error, duration: Date.now() - start },
         })
-        await db.source.update({
+        const updatedSource = await db.source.update({
           where: { id: sourceId },
           data: { fetchStatus: 'ERROR', errorCount: { increment: 1 }, lastError: error.slice(0, 200) },
+          select: { id: true, name: true, errorCount: true, endpoint: true },
         })
+        // Alert on configurable consecutive failure threshold
+        const thresholdStr = await getSettingValue('broken_source_threshold').catch(() => null)
+        const threshold = thresholdStr ? parseInt(thresholdStr) : 3
+        if (updatedSource.errorCount >= 1 && updatedSource.errorCount % threshold === 0) {
+          const webhookUrl = await getSettingValue('webhook_url').catch(() => null)
+          if (webhookUrl) {
+            fetch(webhookUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                event: 'source.broken',
+                source: { id: updatedSource.id, name: updatedSource.name, endpoint: updatedSource.endpoint },
+                errorCount: updatedSource.errorCount,
+                error,
+                ts: new Date().toISOString(),
+              }),
+            }).catch(() => {})
+          }
+          const { sendSourceBrokenAlert } = await import('../lib/email.js')
+          await sendSourceBrokenAlert(updatedSource.name, updatedSource.endpoint, error, updatedSource.errorCount)
+        }
         throw err
       } finally {
         await releaseLock(sourceId)

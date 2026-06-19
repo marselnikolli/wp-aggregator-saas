@@ -23,10 +23,17 @@ import { usersRoutes } from './routes/users.js'
 import { apiKeysRoutes, resolveApiKey } from './routes/apiKeys.js'
 import { pipelinesRoutes } from './routes/pipelines.js'
 import { feedRoutes } from './routes/feed.js'
+import { socialAccountsRoutes } from './routes/socialAccounts.js'
+import { socialRoutes } from './routes/social.js'
+import { captionTemplatesRoutes } from './routes/captionTemplates.js'
+import { imageTemplatesRoutes } from './routes/imageTemplates.js'
+import { dedupRoutes } from './routes/dedup.js'
 import { startFetchWorker } from './workers/fetcher.js'
 import { startPublishWorker } from './workers/publisher.js'
 import { startSummarizerWorker } from './workers/summarizer.js'
 import { startSchedPublishWorker, applyScheduledPublishSettings } from './workers/schedPublisher.js'
+import { startSocialWorker } from './workers/socialWorker.js'
+import { startTokenRotationWorker, scheduleRotationCheck } from './workers/tokenRotationWorker.js'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -124,7 +131,12 @@ async function bootstrap() {
   await app.register(metricsRoutes)
   await app.register(usersRoutes,     { prefix })
   await app.register(apiKeysRoutes,   { prefix })
-  await app.register(pipelinesRoutes, { prefix })
+  await app.register(pipelinesRoutes,      { prefix })
+  await app.register(socialAccountsRoutes,    { prefix })
+  await app.register(socialRoutes,            { prefix })
+  await app.register(captionTemplatesRoutes,  { prefix: '/api/social' })
+  await app.register(imageTemplatesRoutes,    { prefix })
+  await app.register(dedupRoutes,               { prefix })
   await app.register(bullboardRoutes)
   await app.register(feedRoutes)
 
@@ -136,6 +148,9 @@ async function bootstrap() {
     startPublishWorker()
     startSummarizerWorker()
     startSchedPublishWorker()
+    startSocialWorker()
+    startTokenRotationWorker()
+    await scheduleRotationCheck()
     await registerSourceSchedulers()
     await applyScheduledPublishSettings()
   }

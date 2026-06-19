@@ -1,32 +1,44 @@
 # WP Aggregator SaaS — Backlog
 
-## [x] Fix HTML entities in post titles
-## [x] Fix missing featured images for RSS sources (og:image scrape fallback)
-## [x] Preview pane: show original article permalink (domain + ↗)
-## [x] Preview pane: editable categories (inline tag input, auto-save)
-## [x] Settings page: reorganize into sections with anchor nav
-## [x] Light / dark mode toggle (sidebar footer, persisted to localStorage)
+## Completed
 
----
+### [x] Social sharing redesign
 
-## Next suggestions
+- [x] Add "Published" tab on Posts page filtering by publishStatus
+- [x] Fix ShareDialog to show destination URL, restrict to published posts
+- [x] Fix `resolvePostUrl` in socialWorker.ts — no fallback to originalUrl, fail instead
+- [x] Fix caption generation to use wpUrl instead of undefined
+- [x] Add validation in POST /social/publish — require DONE publish task
+- [x] Add DB index on PublishTask
 
-### [ ] Post deduplication dashboard
+### [x] Source posted date is 2h earlier than actual time
 
-Show which posts were marked as semantic duplicates with a "Mark as unique" override to re-queue them for publishing.
+- [x] Added `TZ: Europe/Tirane` to postgres, server, and worker containers in docker-compose
 
-### [ ] Multi-language pipeline routing
+### [x] Date filter needs proper granular time options
 
-Route posts to different target sites based on detected language (e.g. `sq` → albanian-site.com, `en` → english-site.com).
+- [x] Added "Last hour", "Last 2 hours", "Last 6 hours" presets alongside existing options
 
-### [ ] Broken source alerting
+### [x] Posts created on the fly don't get featured image or category
 
-When a source fetch fails N consecutive times, fire a webhook notification with the source name and error message.
+- [x] Enhanced `tryOgImageFallback` to also look for first `<img>` in article body when og:image is missing
+- [x] AI summarizer already appends AI-suggested categories to post categories
 
-### [ ] Content diff viewer
+### [x] Auto-clear scraped/unpublished posts after 1 week
 
-In the post preview, show a side-by-side diff between original content and the AI-rewritten version so editors can compare before publishing.
+- [x] Created `apps/server/src/workers/cleaner.ts` — runs every 24h, deletes DRAFT posts older than 7 days
+- [x] Registered in `worker-runner.ts`
 
-### [ ] Bulk re-fetch missing images
+### [x] Mystery "asl" text in preview pane
 
-One-click button on the Sources page to re-scrape og:image for all existing posts that still have no featured image.
+- [x] Searched entire codebase (client + server) — no "asl" text found anywhere. Likely content from a specific feed article or already resolved.
+
+### [x] Sources grouping filter
+
+- [x] Added `GET /sources/groups` backend endpoint returning distinct group names
+- [x] Added `sourcesApi.groups()` client API method
+- [x] Added group filter dropdown on Sources page
+
+### [x] Restrict language filter to: Albanian, English, Italian, Spanish only
+
+- [x] Filtered language options in Posts page to only show `sq`, `en`, `it`, `es`

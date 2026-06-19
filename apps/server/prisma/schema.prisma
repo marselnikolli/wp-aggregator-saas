@@ -46,6 +46,7 @@ model Site {
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
   publishTasks    PublishTask[]
+  socialAccounts  SocialAccount[]
 
   @@index([enabled])
 }
@@ -68,6 +69,7 @@ model Source {
   categoryMappings  Json?
   paginationParam   String?
   tags              String[]         @default([])
+  group             String?
   minDelaySec       Int              @default(1)
   userAgent         String?
   proxyUrl          String?
@@ -105,9 +107,11 @@ model AggregatedPost {
   publishStatus  PublishStatus  @default(DRAFT)
   scheduledDate  DateTime?
   publishedDate  DateTime?
+  sourcePublishedAt DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   publishTasks   PublishTask[]
+  socialPosts    SocialPost[]
 
   @@index([sourceId])
   @@index([publishStatus])
@@ -135,6 +139,7 @@ model PublishTask {
 
   @@unique([postId, siteId])
   @@index([status])
+  @@index([siteId, status])
 }
 
 model FetchJob {
@@ -203,6 +208,12 @@ model Pipeline {
   publishWindowHours   Int      @default(0)
   aiPrompt             String?
   sortOrder            Int      @default(0)
+  socialAccountId      String?
+  socialTemplate       String?
+  languageSiteMapping  Json?
+  // Array of { sourceId, sourceCategory, destCategoryId, destCategoryName }
+  categoryMappings     Json?
+  postLimit            Int      @default(50)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -235,4 +246,89 @@ model AuditLog {
   @@index([createdAt])
   @@index([userId])
   @@index([resourceType, resourceId])
+}
+
+enum SocialPlatform {
+  FACEBOOK
+  INSTAGRAM
+}
+
+enum SocialStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+  SCHEDULED
+  CANCELLED
+}
+
+model SocialAccount {
+  id                 String          @id @default(cuid())
+  name               String
+  platform           SocialPlatform
+  pageId             String
+  accessToken        String
+  appId              String?
+  appSecret          String?
+  longLivedUserToken String?
+  lastRotation       DateTime?
+  rotationDays       Int             @default(50)
+  linkedAccountId    String?
+  linkedAccount      SocialAccount?  @relation("AccountLink", fields: [linkedAccountId], references: [id], onDelete: SetNull)
+  linkedAccounts     SocialAccount[] @relation("AccountLink")
+  siteId             String?
+  site               Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  enabled            Boolean         @default(true)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  socialPosts        SocialPost[]
+}
+
+model SocialPost {
+  id                String         @id @default(cuid())
+  postId            String
+  post              AggregatedPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  accountId         String
+  account           SocialAccount  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  platform          SocialPlatform
+  template          String
+  captionTemplateId String?
+  status            SocialStatus   @default(PENDING)
+  scheduledAt       DateTime?
+  publishedAt       DateTime?
+  platformPostId    String?
+  error             String?
+  reach             Int?
+  impressions       Int?
+  engagement        Int?
+  createdAt         DateTime       @default(now())
+
+  @@index([postId])
+  @@index([accountId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model CaptionTemplate {
+  id              String         @id @default(cuid())
+  name            String
+  platform        SocialPlatform
+  language        String         @default("sq")
+  includeHashtags Boolean        @default(true)
+  includeExcerpt  Boolean        @default(false)
+  includeContent  Boolean        @default(false)
+  brandingText    String?
+  emojiStyle      String         @default("category")
+  categoryColors  Json?
+  createdAt       DateTime       @default(now())
+}
+
+model ImageTemplate {
+  id        String         @id @default(cuid())
+  name      String
+  platform  SocialPlatform
+  elements  Json           // TemplateElement[] (see below)
+  logoUrl   String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
 }
