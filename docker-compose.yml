@@ -39,7 +39,7 @@ services:
       JWT_SECRET: super-secret-jwt-key-change-in-production
       ENCRYPTION_KEY: 32-char-encryption-key-change-now
       PORT: "3001"
-      CORS_ORIGIN: http://localhost:8090
+      CORS_ORIGIN: http://localhost
       NODE_ENV: production
       SENTRY_DSN: ""
     ports:
@@ -77,11 +77,22 @@ services:
       context: ./apps/client
       dockerfile: Dockerfile
     restart: unless-stopped
+    networks:
+      - default
+      - caddy_network
     ports:
       - '8090:80'
     depends_on:
       - server
+    labels:
+      caddy: http://localhost
+      caddy.route: /aggregator/*
+      caddy.route.reverse_proxy: "{{upstreams 80}}"
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  caddy_network:
+    external: true

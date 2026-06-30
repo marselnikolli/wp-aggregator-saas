@@ -26,7 +26,7 @@ export function Login() {
       }
       localStorage.setItem('token', res.token)
       // Reload so AuthContext picks up the new token
-      window.location.href = '/'
+      window.location.href = '/aggregator/'
     } catch (err: any) {
       setError(err.response?.data?.error ?? 'Invalid credentials')
     } finally {

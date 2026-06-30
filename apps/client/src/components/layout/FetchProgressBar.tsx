@@ -19,8 +19,8 @@ export function FetchProgressBar() {
   useEffect(() => {
     const token = localStorage.getItem('token')
     const url   = token
-      ? `/api/sources/events?token=${encodeURIComponent(token)}`
-      : '/api/sources/events'
+      ? `/aggregator/api/sources/events?token=${encodeURIComponent(token)}`
+      : '/aggregator/api/sources/events'
     const es = new EventSource(url)
 
     es.addEventListener('job:active', (e) => {

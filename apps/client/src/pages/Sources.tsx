@@ -770,7 +770,7 @@ export function Sources() {
     async function connect() {
       try {
         const token = localStorage.getItem('token')
-        const res = await fetch('/api/sources/events', {
+        const res = await fetch('/aggregator/api/sources/events', {
           headers: { Authorization: `Bearer ${token}` },
           signal: controller.signal,
         })

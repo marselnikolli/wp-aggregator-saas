@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-export const api = axios.create({ baseURL: '/api' })
+export const api = axios.create({ baseURL: '/aggregator/api' })
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('token')
@@ -13,7 +13,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
-      window.location.href = '/login'
+      window.location.href = '/aggregator/login'
     }
     return Promise.reject(err)
   },

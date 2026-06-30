@@ -77,7 +77,7 @@ function AppRoutes() {
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
-      <BrowserRouter>
+      <BrowserRouter basename="/aggregator">
         <AuthProvider>
           <FetchProgressBar />
           <AppRoutes />
